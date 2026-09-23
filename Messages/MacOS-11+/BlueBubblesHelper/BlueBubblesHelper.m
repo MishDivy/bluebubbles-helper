@@ -24,6 +24,7 @@
 #import "IMChatRegistry.h"
 #import "NetworkController.h"
 #import "Logging.h"
+#import "BBHCompatibility.h"
 #import "IMHandleRegistrar.h"
 #import "IMCore.h"
 #import "IMChatHistoryController.h"
@@ -279,11 +280,10 @@ NSMutableArray* vettedAliases;
         IMHandle *handle = [[[IMAccountController sharedInstance] activeIMessageAccount] imHandleWithID:(data[@"address"])];
 
         if (handle != nil && chat != nil && [chat canAddParticipant:(handle)]) {
-            [chat inviteParticipantsToiMessageChat:(@[handle]) reason:(0)];
-            if (transaction != nil) {
-                [[NetworkController sharedInstance] sendMessage: @{@"transactionId": transaction}];
-            }
-            DLog("BLUEBUBBLESHELPER: Added participant to chat %{public}@: %{public}@", data[@"chatGuid"], data[@"address"]);
+            NSString *error = BBHInviteParticipant(chat, handle);
+            NSDictionary *response = BBHActionResponse(transaction, error);
+            if (response) [[NetworkController sharedInstance] sendMessage:response];
+            DLog("BLUEBUBBLESHELPER: Participant invitation dispatch %{public}@", error ? @"failed" : @"accepted");
         } else {
             if (transaction != nil) {
                 [[NetworkController sharedInstance] sendMessage: @{@"transactionId": transaction, @"error": @"Failed to add address to chat!"}];
@@ -321,22 +321,26 @@ NSMutableArray* vettedAliases;
     // If the server tells us to edit a message
     } else if ([event isEqualToString:@"edit-message"]) {
         IMChat *chat = [BlueBubblesHelper getChat: data[@"chatGuid"] :transaction];
-
-        [BlueBubblesHelper getMessageItem:(chat) :(data[@"messageGuid"]) completionBlock:^(IMMessage *message) {
-            NSMutableAttributedString *editedString = [[NSMutableAttributedString alloc] initWithString: data[@"editedMessage"]];
-            NSMutableAttributedString *bcString = [[NSMutableAttributedString alloc] initWithString: data[@"backwardsCompatibilityMessage"]];
-
-            if ([[NSProcessInfo processInfo] operatingSystemVersion].majorVersion >= 14) {
-                IMMessageItem *messageItem = (IMMessageItem *)message._imMessageItem;
-                [chat editMessageItem:(messageItem) atPartIndex:([data[@"partIndex"] longValue]) withNewPartText:(editedString) backwardCompatabilityText:(bcString)];
-            } else {
-                [chat editMessage:(message) atPartIndex:([data[@"partIndex"] integerValue]) withNewPartText:(editedString) backwardCompatabilityText:(bcString)];
-            }
-        }];
-
-        if (transaction != nil) {
-            [[NetworkController sharedInstance] sendMessage: @{@"transactionId": transaction}];
+        if (chat == nil) return; // getChat already reports lookup errors.
+        if (![data[@"editedMessage"] isKindOfClass:[NSString class]]
+            || ![data[@"backwardsCompatibilityMessage"] isKindOfClass:[NSString class]]
+            || ![data[@"messageGuid"] isKindOfClass:[NSString class]]
+            || ![data[@"partIndex"] isKindOfClass:[NSNumber class]]) {
+            NSDictionary *response = BBHActionResponse(transaction, @"Invalid edit request");
+            if (response) [[NetworkController sharedInstance] sendMessage:response];
+            return;
         }
+
+        [BlueBubblesHelper getMessageItem:chat :data[@"messageGuid"] completionBlock:^(IMMessage *message) {
+            NSMutableAttributedString *editedString = [[NSMutableAttributedString alloc] initWithString:data[@"editedMessage"]];
+            NSMutableAttributedString *bcString = [[NSMutableAttributedString alloc] initWithString:data[@"backwardsCompatibilityMessage"]];
+            NSString *error = BBHEditMessage(chat, message, message._imMessageItem,
+                                            [data[@"partIndex"] integerValue], editedString, bcString);
+            // Acknowledge only after dispatch, and report unsupported selectors/errors.
+            // The server must still verify persistence in Messages.
+            NSDictionary *response = BBHActionResponse(transaction, error);
+            if (response) [[NetworkController sharedInstance] sendMessage:response];
+        }];
     // If the server tells us to unsend a message
     } else if ([event isEqualToString:@"unsend-message"]) {
         IMChat *chat = [BlueBubblesHelper getChat: data[@"chatGuid"] :transaction];
@@ -583,7 +587,7 @@ NSMutableArray* vettedAliases;
                     NSTimeInterval delayInSeconds = 1.0;
                     dispatch_time_t popTime = dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delayInSeconds * NSEC_PER_SEC));
                     dispatch_after(popTime, dispatch_get_main_queue(), ^(void){
-                        NSInteger *status = [[cls sharedInstance] availabilityForHandle:(handle)];
+                        NSInteger status = [[cls sharedInstance] availabilityForHandle:(handle)];
                         DLog("BLUEBUBBLESHELPER: Found status %{public}ld for %{public}@", (long)status, data[@"address"]);
                         if (transaction != nil) {
                             BOOL silenced = status == 2;
@@ -637,7 +641,7 @@ NSMutableArray* vettedAliases;
         }
 
         [[IDSIDQueryController sharedInstance] forceRefreshIDStatusForDestinations:(@[dest]) service:(serviceName) listenerID:(@"SOIDSListener-com.apple.imessage-rest") queue:(dispatch_queue_create("HandleIDS", NULL)) completionBlock:^(NSDictionary *response) {
-            NSInteger *status = [response.allValues.firstObject integerValue];
+            NSInteger status = [response.allValues.firstObject integerValue];
             BOOL available = status == 1;
             DLog("BLUEBUBBLESHELPER: Status for %{public}@ is %{public}ld", data[@"address"], (long)available);
             if (transaction != nil) {
@@ -783,7 +787,7 @@ NSMutableArray* vettedAliases;
             NSMutableArray* locations = [[NSMutableArray alloc] initWithArray:@[]];
             for (NSObject* handle in handles) {
                 FMFLocation* location = [[IMFMFSession sharedInstance] locationForFMFHandle:handle];
-                NSInteger* type = ([[NSProcessInfo processInfo] operatingSystemVersion].majorVersion < 13) ? 0 : [location locationType];
+                NSInteger type = ([[NSProcessInfo processInfo] operatingSystemVersion].majorVersion < 13) ? 0 : [location locationType];
                 NSDictionary* locDetails = @{
                     @"handle": [[location handle] identifier] ?: [NSNull null],
                     @"coordinates": @[@([location coordinate].latitude), @([location coordinate].longitude)],
@@ -1256,7 +1260,7 @@ ZKSwizzleInterface(BBH_FMFSessionDataManager, FMFSessionDataManager , NSObject)
     DLog("BLUEBUBBLESHELPER: Got new locations: %{public}@", locations);
     
     for (FMFLocation* location in locations) {
-        NSInteger* type = ([[NSProcessInfo processInfo] operatingSystemVersion].majorVersion < 13) ? 0 : [location locationType];
+        NSInteger type = ([[NSProcessInfo processInfo] operatingSystemVersion].majorVersion < 13) ? 0 : [location locationType];
         NSMutableDictionary* locDetails = [[NSMutableDictionary alloc] initWithDictionary: @{
             @"handle": [[location handle] identifier] ?: [NSNull null],
             @"coordinates": @[@([location coordinate].latitude), @([location coordinate].longitude)],

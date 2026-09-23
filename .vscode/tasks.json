@@ -1,0 +1,7 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {"label": "Test compatibility (macOS)", "type": "process", "command": "${workspaceFolder}/scripts/test-compatibility.sh", "group": "test", "problemMatcher": "$gcc"},
+    {"label": "Build Messages helper (macOS, no install)", "type": "process", "command": "${workspaceFolder}/scripts/build-messages.sh", "group": "build", "problemMatcher": "$gcc"}
+  ]
+}

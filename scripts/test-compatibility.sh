@@ -1,0 +1,10 @@
+#!/bin/bash
+set -euo pipefail
+root=$(cd -- "$(dirname -- "$0")/.." && pwd -P)
+[[ $(uname -s) == Darwin ]] || { echo 'Requires macOS Command Line Tools.' >&2; exit 2; }
+test_dir=$(mktemp -d "${TMPDIR:-/tmp}/bbh-compat-test.XXXXXXXX")
+trap 'rm -f "$test_dir/compat-test"; rmdir "$test_dir"' EXIT
+xcrun clang -fobjc-arc -fblocks -Wall -Wextra -Werror -framework Foundation \
+    -I"$root/Messages/MacOS-11+/BlueBubblesHelper" \
+    "$root/tests/compatibility.m" -o "$test_dir/compat-test"
+"$test_dir/compat-test"

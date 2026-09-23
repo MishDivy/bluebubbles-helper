@@ -1,3 +1,6 @@
+> Personal compatibility branch: see [build, tests, VS Code and deployment boundaries](docs/compatibility-fork.md).
+> The scripts in that guide build only; the legacy Xcode instructions below can install and restart Messages.
+
 ## BlueBubbles Helper Bundle (Private API)
 
 This is the repo for the bundle containing code to perform various tasks not accessible through Apple's AppleScript, for example sending tapbacks or typing indicators.
