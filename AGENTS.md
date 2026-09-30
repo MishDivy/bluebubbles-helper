@@ -1,8 +1,12 @@
-# Personal compatibility branch
+# Fork branch policy
 
-- Keep master aligned with upstream. The fix/macos-edit-and-invite branch is
-  based on released helper 0.0.21 (2163c5aa39e56077d2f3e510808ac20b0703843b),
-  deliberately not the later broad rewrite on master.
+- main is this fork's canonical tested production branch, promoted from
+  feature/custom-reactions at 0a9072f1172bc46f1a33a2bc58b8df05cd8e81ef.
+  It is based on released helper 0.0.21 (2163c5aa39e56077d2f3e510808ac20b0703843b).
+- Preserve master as the separate upstream rewrite line. Integrating that rewrite
+  requires its own review and tests; changing a default branch is not deployment.
+- Keep deployment pinned to the reviewed helper commit and artifact hash. The
+  branch promotion does not replace or rebuild the installed helper.
 - Scope changes to Messages/MacOS-11+, its tests and build tooling. Do not modify
   FaceTime, MacOS-10, account state or the upstream transport without a new need.
 - Build with scripts/build-messages.sh and test with scripts/test-compatibility.sh.

@@ -1,9 +1,12 @@
 # Editing and participant invitation compatibility
 
-This branch is based on released helper **0.0.21**, commit
+The fork's canonical tested production branch is `main`, promoted from
+`feature/custom-reactions` at `0a9072f1172bc46f1a33a2bc58b8df05cd8e81ef`.
+It is based on released helper **0.0.21**, commit
 `2163c5aa39e56077d2f3e510808ac20b0703843b`, not the broader rewrite on master.
-Keep master aligned with upstream. Do not merge this branch into master simply
-to deploy it: build its exact reviewed commit instead.
+Preserve `master` as the separate upstream rewrite line. Build an exact reviewed
+commit; do not merge the rewrite merely to deploy. The branch promotion retains
+the pinned helper identity above and does not change the installed binary.
 
 The original shipped helper's arm64/arm64e `__text` and `__cstring` sections were
 compared with the 0.0.21 release and matched. File hashes differ because the
