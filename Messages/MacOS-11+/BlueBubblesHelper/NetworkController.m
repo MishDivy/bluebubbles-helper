@@ -10,6 +10,7 @@
 #import "NetworkController.h"
 #import "GCDAsyncSocket.h"
 #import "Logging.h"
+#import "BBHReactions.h"
 
 @implementation NetworkController
 
@@ -81,6 +82,7 @@ static id sharedInstance = nil;
         @"event": @"ping",
         @"message": @"Helper Connected!",
         @"process": [[NSBundle mainBundle] bundleIdentifier],
+        @"capabilities": BBHReactionCapabilities(),
     };
     [self sendMessage:message];
 }

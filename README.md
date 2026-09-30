@@ -1,5 +1,6 @@
 > Personal compatibility branch: see [build, tests, VS Code and deployment boundaries](docs/compatibility-fork.md).
 > The scripts in that guide build only; the legacy Xcode instructions below can install and restart Messages.
+> The feature branch's [custom reaction contract and sticker limitations](docs/custom-reactions.md) describe runtime capabilities and the remaining acceptance gate.
 
 ## BlueBubbles Helper Bundle (Private API)
 

@@ -25,6 +25,7 @@
 #import "NetworkController.h"
 #import "Logging.h"
 #import "BBHCompatibility.h"
+#import "BBHReactions.h"
 #import "IMHandleRegistrar.h"
 #import "IMCore.h"
 #import "IMChatHistoryController.h"
@@ -969,6 +970,21 @@ NSMutableArray* vettedAliases;
 
 
 +(void) sendMessage: (NSDictionary *) data transfers: (NSArray *) transfers attributedString:(NSMutableAttributedString *) attributedString transaction:(NSString *) transaction {
+    NSString *reactionType = [data[@"reactionType"] isKindOfClass:[NSString class]] ? data[@"reactionType"] : nil;
+    BOOL customEmoji = [reactionType isEqualToString:@"emoji"] || [reactionType isEqualToString:@"-emoji"];
+    if (reactionType.length && !customEmoji && [BlueBubblesHelper parseReactionType:reactionType] == 0) {
+        NSDictionary *response = BBHActionResponse(transaction, @"Unsupported reaction type");
+        if (response) [[NetworkController sharedInstance] sendMessage:response];
+        return;
+    }
+    if (customEmoji && (!BBHValidReactionEmoji(data[@"reactionEmoji"])
+        || ![data[@"selectedMessageGuid"] isKindOfClass:[NSString class]] || ![data[@"selectedMessageGuid"] length]
+        || ![data[@"partIndex"] isKindOfClass:[NSNumber class]] || [data[@"partIndex"] integerValue] < 0
+        || [data[@"partIndex"] doubleValue] != (double)[data[@"partIndex"] integerValue])) {
+        NSDictionary *response = BBHActionResponse(transaction, @"Invalid custom emoji reaction arguments");
+        if (response) [[NetworkController sharedInstance] sendMessage:response];
+        return;
+    }
     IMChat *chat = [BlueBubblesHelper getChat: data[@"chatGuid"] :transaction];
     if (chat == nil) {
         DLog("BLUEBUBBLESHELPER: chat is null, aborting");
@@ -1031,7 +1047,7 @@ NSMutableArray* vettedAliases;
         [BlueBubblesHelper getMessageItem:(chat) :(data[@"selectedMessageGuid"]) completionBlock:^(IMMessage *message) {
             IMMessageItem *messageItem = (IMMessageItem *)message._imMessageItem;
             NSObject *items = messageItem._newChatItems;
-            IMMessagePartChatItem *item;
+            IMMessagePartChatItem *item = nil;
             // sometimes items is an array so we need to account for that
             if ([items isKindOfClass:[NSArray class]]) {
                 for (IMMessagePartChatItem *i in (NSArray *) items) {
@@ -1055,6 +1071,27 @@ NSMutableArray* vettedAliases;
                 }
             } else {
                 item = (IMMessagePartChatItem *)items;
+            }
+            if (customEmoji) {
+                NSString *error = nil;
+                NSString *previousGUID = [[chat lastSentMessage] guid];
+                if (!message || !BBHReactionPartMatches(item, [data[@"partIndex"] integerValue])) {
+                    error = @"Custom emoji reaction target part was not found";
+                } else {
+                    error = BBHSendEmojiReaction(chat, item, reactionType, data[@"reactionEmoji"],
+                        NSClassFromString(@"IMEmojiTapback"), NSClassFromString(@"CKChatItem"));
+                }
+                if (error) {
+                    NSDictionary *response = BBHActionResponse(transaction, error);
+                    if (response) [[NetworkController sharedInstance] sendMessage:response];
+                } else if (transaction) {
+                    BBHWaitForReactionGUID(previousGUID, ^{ return [[chat lastSentMessage] guid]; }, 20, ^(NSString *guid) {
+                        NSDictionary *response = guid ? @{@"transactionId": transaction, @"identifier": guid}
+                            : BBHActionResponse(transaction, @"Emoji reaction dispatched but not confirmed; check before retrying");
+                        [[NetworkController sharedInstance] sendMessage:response];
+                    });
+                }
+                return;
             }
             if (data[@"reactionType"] != [NSNull null] && [data[@"reactionType"] length] != 0) {
                 NSString *reaction = data[@"reactionType"];
