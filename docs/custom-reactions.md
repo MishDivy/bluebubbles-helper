@@ -29,7 +29,7 @@ The initial socket `ping` retains its existing fields and adds:
 | IMEmojiTapback instance | `initWithEmoji:isRemoved:` | object / object, C `bool` |
 | CKChatItem class | `chatItemWithIMChatItem:balloonMaxWidth:` | object / object, CGFloat |
 | CKChatItem class, alternative | `chatItemWithIMChatItem:balloonMaxWidth:fullMaxWidth:transcriptTraitCollection:overlayLayout:` | object / object, CGFloat, CGFloat, object, BOOL |
-| IMChat instance | `sendTapback:forChatItem:` | void / object, object |
+| IMChat instance | `sendTapback:forChatItem:` | void or object / object, object |
 
 An absent class or changed signature means false, regardless of OS version.
 The upstream source describes this path as macOS 26+. Earlier systems with a
@@ -80,6 +80,26 @@ cannot load it (`wrong platform to load into process`). Use
 It does not bypass dyld's platform check or change the helper build target.
 If the installed Command Line Tools SDK lacks Catalyst support, the probe
 reports that missing prerequisite; do not infer native readiness from that.
+
+The coordinated macOS 27 probe on September 30, 2026 ran successfully as a
+Catalyst executable. It found the expected emoji initializer and short CKChatItem
+factory. `IMChat sendTapback:forChatItem:` reported `@32@0:8@16@24`: an object
+return and two object arguments. The first guard accepted only the upstream
+header's void return and correctly reported false. The implementation now checks
+both exact signatures and calls each through its matching function type. It
+discards the object return without assuming it is a message or a delivery result.
+Synthetic fixtures cover both return types and reject incompatible arguments.
+The probe also found `sendTapback:forChatItem:languageIdentifier:`; this patch
+does not use that method. After the ABI update, both synthetic suites passed
+and the Catalyst probe reported `Custom emoji native API available: yes`.
+Its IMChat class came from the iOSSupport IMCore framework. These checks verify
+method metadata in the probe process; the injected helper's capability handshake
+and native message delivery still require acceptance testing.
+
+The same probe found the sticker media-object and composition factories, plus
+`setIsSticker:` with a Boolean argument and `setStickerUserInfo:` with an object
+argument. It did not find the upstream-declared sticker file-transfer factory.
+These results provide method metadata only; sticker capability remains false.
 
 Before any production replacement, use the reviewed deployment/rollback
 procedure and a user-approved self-chat acceptance window. Exercise custom

@@ -2,6 +2,7 @@
 #import "BBHReactions.h"
 #include <dlfcn.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 int main(void) {
     @autoreleasepool {
@@ -17,8 +18,28 @@ int main(void) {
             }
         }
         Class chat = NSClassFromString(@"IMChat"), emoji = NSClassFromString(@"IMEmojiTapback"), item = NSClassFromString(@"CKChatItem");
+        printf("IMChat class: %s\n", chat ? class_getName(chat) : "absent");
+        if (chat) printf("IMChat image: %s\n", class_getImageName(chat) ?: "unknown");
+        const char *sendSelectors[] = {"sendTapback:forChatItem:", "sendMessageAcknowledgment:forChatItem:",
+            "sendMessageAcknowledgment:forChatItem:withAssociatedMessageInfo:"};
+        for (NSUInteger i = 0; i < 3; ++i) {
+            Method method = class_getInstanceMethod(chat, sel_registerName(sendSelectors[i]));
+            printf("IMChat %s ABI=%s\n", sendSelectors[i], method ? method_getTypeEncoding(method) : "absent");
+        }
+        // Method metadata can identify a renamed API; it does not authorize an invocation.
+        unsigned int methodCount = 0;
+        Method *methods = class_copyMethodList(chat, &methodCount);
+        for (unsigned int i = 0; i < methodCount; ++i) {
+            const char *name = sel_getName(method_getName(methods[i]));
+            if (strstr(name, "Tapback") || strstr(name, "tapback")) {
+                printf("IMChat tapback research: %s ABI=%s\n", name, method_getTypeEncoding(methods[i]));
+            }
+        }
+        free(methods);
         printf("IMChat sendTapback signature: %s\n", BBHReactionClassMethodMatches(chat,
-            NSSelectorFromString(@"sendTapback:forChatItem:"), NO, "v", @[@"@", @"@"]) ? "compatible" : "unavailable");
+            NSSelectorFromString(@"sendTapback:forChatItem:"), NO, "v", @[@"@", @"@"]) ? "compatible (void return)"
+            : BBHReactionClassMethodMatches(chat, NSSelectorFromString(@"sendTapback:forChatItem:"), NO, "@", @[@"@", @"@"])
+                ? "compatible (object return)" : "unavailable");
         printf("IMEmojiTapback initializer signature: %s\n", BBHReactionClassMethodMatches(emoji,
             @selector(initWithEmoji:isRemoved:), NO, "@", @[@"@", @(@encode(bool))]) ? "compatible" : "unavailable");
         SEL factory = BBHReactionChatItemFactory(item);

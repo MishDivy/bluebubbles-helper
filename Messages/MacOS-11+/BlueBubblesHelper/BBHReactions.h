@@ -38,7 +38,8 @@ static inline BOOL BBHCustomEmojiReactionsAvailable(Class chat, Class tapback, C
     return chat && tapback && chatItem
         && BBHReactionClassMethodMatches(tapback, @selector(initWithEmoji:isRemoved:), NO, "@", @[@"@", @(@encode(bool))])
         && BBHReactionChatItemFactory(chatItem)
-        && BBHReactionClassMethodMatches(chat, NSSelectorFromString(@"sendTapback:forChatItem:"), NO, "v", @[@"@", @"@"]);
+        && (BBHReactionClassMethodMatches(chat, NSSelectorFromString(@"sendTapback:forChatItem:"), NO, "v", @[@"@", @"@"])
+            || BBHReactionClassMethodMatches(chat, NSSelectorFromString(@"sendTapback:forChatItem:"), NO, "@", @[@"@", @"@"]));
 }
 
 static inline NSDictionary *BBHReactionCapabilities(void) {
@@ -92,7 +93,14 @@ static inline NSString *BBHSendEmojiReaction(id chat, id part, NSString *type, i
         if (!chatItem) return @"Unable to construct a native reaction target";
         id tapback = [[tapbackClass alloc] initWithEmoji:emoji isRemoved:[type isEqualToString:@"-emoji"]];
         if (!tapback) return @"Unable to construct a native emoji reaction";
-        ((void (*)(id, SEL, id, id))objc_msgSend)(chat, NSSelectorFromString(@"sendTapback:forChatItem:"), tapback, chatItem);
+        SEL send = NSSelectorFromString(@"sendTapback:forChatItem:");
+        if (BBHReactionClassMethodMatches([chat class], send, NO, "@", @[@"@", @"@"])) {
+            // macOS 27 reports an object return. Its meaning is not established;
+            // use its exact ABI, and let the server confirm the reaction row.
+            (void)((id (*)(id, SEL, id, id))objc_msgSend)(chat, send, tapback, chatItem);
+        } else {
+            ((void (*)(id, SEL, id, id))objc_msgSend)(chat, send, tapback, chatItem);
+        }
     } @catch (NSException *exception) {
         (void)exception;
         return @"Native emoji reaction raised an exception";

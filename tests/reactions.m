@@ -35,6 +35,18 @@
 }
 @end
 
+@interface ObjectChatFixture : NSObject
+@property EmojiFixture *tapback;
+@property id part;
+@property NSUInteger calls;
+@end
+@implementation ObjectChatFixture
+- (id)sendTapback:(id)tapback forChatItem:(id)part {
+    self.tapback = tapback; self.part = part; self.calls++;
+    return [NSObject new]; // The caller must not assume this object is a message.
+}
+@end
+
 @interface ShortFactory : NSObject @end
 @implementation ShortFactory
 + (id)chatItemWithIMChatItem:(id)part balloonMaxWidth:(CGFloat)width {
@@ -53,7 +65,14 @@
 
 @interface WrongChat : NSObject @end
 @implementation WrongChat
-- (id)sendTapback:(id)tapback forChatItem:(id)part {
+- (NSInteger)sendTapback:(id)tapback forChatItem:(id)part {
+    (void)tapback; (void)part; assert(0); return 0;
+}
+@end
+
+@interface WrongObjectChat : NSObject @end
+@implementation WrongObjectChat
+- (id)sendTapback:(id)tapback forChatItem:(NSInteger)part {
     (void)tapback; (void)part; assert(0); return nil;
 }
 @end
@@ -114,6 +133,16 @@ int main(void) {
                 assert([chat.tapback.emoji isEqual:emoji] && chat.tapback.removed);
             }
             assert(chat.calls == emojis.count * 2); // includes replacement with a different emoji
+            assert(BBHCustomEmojiReactionsAvailable([ObjectChatFixture class], emojiClass, factory));
+            ObjectChatFixture *objectChat = [ObjectChatFixture new];
+            for (NSString *emoji in emojis) {
+                assert(!BBHSendEmojiReaction(objectChat, part, @"emoji", emoji, emojiClass, factory));
+                assert([objectChat.tapback.emoji isEqual:emoji] && !objectChat.tapback.removed);
+                assert([objectChat.part[@"part"] isEqual:part]);
+                assert(!BBHSendEmojiReaction(objectChat, part, @"-emoji", emoji, emojiClass, factory));
+                assert([objectChat.tapback.emoji isEqual:emoji] && objectChat.tapback.removed);
+            }
+            assert(objectChat.calls == emojis.count * 2);
         }
         for (id invalid in @[@"", @"😀😀", @"two words", @42, [NSNull null]]) {
             assert(!BBHValidReactionEmoji(invalid));
@@ -124,6 +153,7 @@ int main(void) {
         assert(!BBHCustomEmojiReactionsAvailable(chatClass, Nil, [ShortFactory class]));
         assert(!BBHCustomEmojiReactionsAvailable(chatClass, emojiClass, Nil));
         assert(!BBHCustomEmojiReactionsAvailable([WrongChat class], emojiClass, [ShortFactory class]));
+        assert(!BBHCustomEmojiReactionsAvailable([WrongObjectChat class], emojiClass, [ShortFactory class]));
         assert(!BBHCustomEmojiReactionsAvailable(chatClass, [WrongEmoji class], [ShortFactory class]));
         assert(!BBHCustomEmojiReactionsAvailable(chatClass, emojiClass, [WrongFactory class]));
         ChatFixture *chat = [ChatFixture new];
