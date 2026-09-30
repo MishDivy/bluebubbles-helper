@@ -72,6 +72,15 @@ the native operation delivers. Run only as a coordinated diagnostic.
 It also inventories the upstream-declared sticker factory/transfer selectors'
 type encodings for research; these do not change the false sticker capability.
 
+On systems where ChatKit is a Mac Catalyst framework, a plain macOS executable
+cannot load it (`wrong platform to load into process`). Use
+`bash scripts/probe-reactions.sh maccatalyst` with a selected SDK containing
+`System/iOSSupport`. This builds the isolated probe for the supported
+[`-target <arch>-apple-ios14.0-macabi` compiler environment](https://github.com/llvm/llvm-project/blob/main/clang/test/Driver/darwin-maccatalyst.c).
+It does not bypass dyld's platform check or change the helper build target.
+If the installed Command Line Tools SDK lacks Catalyst support, the probe
+reports that missing prerequisite; do not infer native readiness from that.
+
 Before any production replacement, use the reviewed deployment/rollback
 procedure and a user-approved self-chat acceptance window. Exercise custom
 emoji add, emoji-to-emoji replacement, standard-to-emoji and reverse, removal,
