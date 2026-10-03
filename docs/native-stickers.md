@@ -288,12 +288,37 @@ width. The descriptor's own sticker scale does not change these two methods'
 output; intrinsic sticker sizing and orientation still need separate checks.
 This probe creates no message, chat, transfer, or view objects and never sends.
 
+The expanded geometry probe also checks synthetic reaction-layout coordinates
+and native dictionary roundtrips. On the tested OS,
+`IMSticker.geometryDescriptorFromUserInfoDictionary:` returned a parent width
+equal to the supplied layout intent, ignoring the supplied `spw`, for both
+numeric and string dictionaries. Other position/scale/rotation fields survived.
+This class-method observation does not establish how a real transcript item
+loads its geometry. Do not rewrite source metadata to reproduce it or claim
+pixel-accurate rendering from the class layout calculations alone.
+
 The `tapback` mode constructs two `IMStickerTapback` descriptors with a synthetic,
 nonexistent transfer GUID after verifying the exact initializer and getter ABIs.
 On the same Mac, their native types were `2007` and `3007` for the false and true
 removal flags. It creates no sender, transfer, chat, account, or message. This
 confirms that those descriptor types exist alongside the observed type-1000
 picker stickers; it does not establish how recipients display either send path.
+
+`tests/probe-sticker-container.m` is a separate public ImageIO diagnostic. It
+accepts only explicitly selected fixture paths and prints bounded container
+counts, dimensions, alpha flags and auxiliary type/shape metadata. It does not
+print paths, artwork, descriptions, content identifiers or transport data. Run it
+only for the user's approved fixtures, never as a library scan. CI compiles it
+but does not run it against private files.
+
+For the selected row and standalone fixtures, ImageIO exposed one 320-by-320
+HEIC image with alpha and orientation 1. Its sole untyped auxiliary descriptor
+contained only width, height, orientation and pixel format `L008`, matching the
+main dimensions. ImageIO's auxiliary-data lookup returned no data for either
+known alpha URN. That observation supports only a narrowly checked raster
+preview, not an inferred auxiliary type or preservation of unknown effects.
+All selected fixtures omitted `stickerEffectType`. Original attachment bytes
+must remain available independently of any derived preview.
 
 Build and synthetic checks use the safe scripts, which never install or restart:
 
