@@ -23,3 +23,5 @@ done
 xcrun clang -fobjc-arc -fblocks -Wall -Wextra -Werror -framework Foundation \
     -I"$root/Messages/MacOS-11+/BlueBubblesHelper" \
     "$root/tests/probe-reactions.m" -o "$test_dir/probe-build-check"
+xcrun clang -fobjc-arc -fblocks -Wall -Wextra -Werror -framework Foundation \
+    "$root/tests/probe-stickers.m" -o "$test_dir/probe-build-check"

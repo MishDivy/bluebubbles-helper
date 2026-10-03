@@ -320,15 +320,21 @@ NSMutableArray* vettedAliases;
     // If the server tells us to send a message or tapback
     } else if ([event isEqualToString:@"send-message"] || [event isEqualToString:@"send-reaction"]) {
         [BlueBubblesHelper sendMessage:(data) transfers:nil attributedString:nil transaction:(transaction)];
-    } else if ([event isEqualToString:@"send-sticker"]) {
+    } else if ([event isEqualToString:@"send-sticker"] || [event isEqualToString:@"send-sticker-row"]) {
+        BOOL row = [event isEqualToString:@"send-sticker-row"];
         NSString *error = nil, *guid = nil;
+        NSArray<NSString *> *attachmentGUIDs = nil;
         @try {
-            if (!BBHStickerRequestValid(data)) error = @"Invalid standalone sticker request";
+            if (row ? !BBHStickerRowRequestValid(data) : !BBHStickerRequestValid(data))
+                error = row ? @"Invalid sticker row request" : @"Invalid standalone sticker request";
             else if (!BBHStickerSendingAvailable()) error = @"Native sticker sending is unavailable";
             else {
                 // This branch avoids getChat's payload-bearing lookup errors.
                 IMChat *chat = [[IMChatRegistry sharedInstance] existingChatWithGUID:data[@"chatGuid"]];
-                error = BBHSendSticker(chat, data, BBHStickerRoot(), [IMFileTransferCenter sharedInstance],
+                if (row) error = BBHSendStickerRow(chat, data, BBHStickerRoot(), [IMFileTransferCenter sharedInstance],
+                    NSClassFromString(@"IMFileTransfer"), NSClassFromString(@"IMMessageItem"),
+                    NSClassFromString(@"IMMessage"), &guid, &attachmentGUIDs);
+                else error = BBHSendSticker(chat, data, BBHStickerRoot(), [IMFileTransferCenter sharedInstance],
                     NSClassFromString(@"IMFileTransfer"), NSClassFromString(@"IMMessageItem"),
                     NSClassFromString(@"IMMessage"), &guid);
             }
@@ -336,9 +342,15 @@ NSMutableArray* vettedAliases;
             (void)exception;
             error = @"Native sticker preparation failed";
         }
-        if (transaction) [[NetworkController sharedInstance] sendMessage:error
-            ? @{@"transactionId": transaction, @"error": error}
-            : @{@"transactionId": transaction, @"identifier": guid}];
+        if (transaction) {
+            NSMutableDictionary *response = [NSMutableDictionary dictionaryWithObject:transaction forKey:@"transactionId"];
+            if (error) response[@"error"] = error;
+            else {
+                response[@"identifier"] = guid;
+                if (row) response[@"attachmentGuids"] = attachmentGUIDs;
+            }
+            [[NetworkController sharedInstance] sendMessage:response];
+        }
     // If the server tells us to edit a message
     } else if ([event isEqualToString:@"edit-message"]) {
         IMChat *chat = [BlueBubblesHelper getChat: data[@"chatGuid"] :transaction];
@@ -1469,4 +1481,3 @@ ZKSwizzleInterface(BBH_IMAccount, IMAccount, NSObject)
 //}
 //
 //@end
-

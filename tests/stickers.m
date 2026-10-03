@@ -16,17 +16,26 @@
 @end
 @implementation StickerTransfer @end
 
+@interface ThrowingStickerTransfer : StickerTransfer @end
+@implementation ThrowingStickerTransfer
+- (void)setStickerUserInfo:(NSDictionary *)info {
+    (void)info; [NSException raise:@"Synthetic" format:@"private sticker metadata"];
+}
+@end
+
 @interface StickerItem : NSObject
 @property NSString *guid;
 @property NSData *bodyData;
 @property NSAttributedString *body;
+@property NSArray<NSString *> *transfers;
 @end
 @implementation StickerItem
 - (instancetype)initWithSender:(id)sender time:(id)time body:(id)body attributes:(id)attributes
              fileTransferGUIDs:(id)transfers flags:(unsigned long long)flags error:(id)error
                           guid:(id)guid threadIdentifier:(id)thread {
-    assert(!sender && time && !attributes && [transfers count] == 1 && flags == 0x100005ULL && !error && !thread);
-    self = [super init]; if (self) { self.guid = guid; self.body = body; } return self;
+    assert(!sender && time && !attributes && [transfers count] >= 1 && [transfers count] <= BBHStickerMaxRowItems
+        && flags == 0x100005ULL && !error && !thread);
+    self = [super init]; if (self) { self.guid = guid; self.body = body; self.transfers = transfers; } return self;
 }
 @end
 
@@ -46,19 +55,42 @@
 @property NSUInteger allocations;
 @property NSUInteger registrations;
 @property BOOL throwRegistration;
+@property NSUInteger failAllocationAt;
+@property NSUInteger failLookupAt;
+@property NSUInteger failStampAt;
+@property NSUInteger failRegistrationAt;
+@property NSUInteger duplicateGUIDAt;
+@property NSMutableArray<StickerTransfer *> *transfers;
+@property NSMutableArray<NSString *> *registeredGUIDs;
 @end
 @implementation StickerCenter
 + (id)sharedInstance { return [self new]; }
 - (id)guidForNewOutgoingTransferWithLocalURL:(NSURL *)url {
-    self.allocations++; self.transfer = [StickerTransfer new];
-    self.transfer.localURL = url; self.transfer.guid = @"synthetic-transfer"; return self.transfer.guid;
+    self.allocations++;
+    if (self.allocations == self.failAllocationAt) [NSException raise:@"Synthetic" format:@"private allocation details"];
+    self.transfer = self.allocations == self.failStampAt ? [ThrowingStickerTransfer new] : [StickerTransfer new];
+    self.transfer.localURL = url;
+    self.transfer.guid = self.allocations == self.duplicateGUIDAt ? self.transfers.firstObject.guid
+        : [NSString stringWithFormat:@"synthetic-transfer-%lu", (unsigned long)self.allocations];
+    if (!self.transfers) self.transfers = [NSMutableArray new];
+    [self.transfers addObject:self.transfer]; return self.transfer.guid;
 }
-- (id)transferForGUID:(id)guid { assert([guid isEqual:self.transfer.guid]); return self.transfer; }
+- (id)transferForGUID:(id)guid {
+    if (self.allocations == self.failLookupAt) return nil;
+    assert([guid isEqual:self.transfer.guid]); return self.transfer;
+}
 - (void)registerTransferWithDaemon:(id)guid {
-    assert([guid isEqual:self.transfer.guid] && self.transfer.isSticker);
-    assert(self.transfer.stickerUserInfo.count && self.transfer.attributionInfo.count);
+    BOOL found = NO;
+    for (StickerTransfer *transfer in self.transfers) {
+        assert(transfer.isSticker && transfer.stickerUserInfo.count && transfer.attributionInfo.count);
+        if ([guid isEqual:transfer.guid]) found = YES;
+    }
+    assert(found);
     self.registrations++;
-    if (self.throwRegistration) [NSException raise:@"Synthetic" format:@"private file path"];
+    if (!self.registeredGUIDs) self.registeredGUIDs = [NSMutableArray new];
+    [self.registeredGUIDs addObject:guid];
+    if (self.throwRegistration || self.registrations == self.failRegistrationAt)
+        [NSException raise:@"Synthetic" format:@"private file path"];
 }
 @end
 
@@ -169,6 +201,23 @@ static NSString *Send(StickerChat *chat, NSDictionary *request, NSString *root,
     return BBHSendSticker(chat, request, root, center, StickerTransfer.class, StickerItem.class, message, guid);
 }
 
+static NSArray<NSString *> *Snapshots(NSString *root) {
+    NSMutableArray *paths = [NSMutableArray new];
+    for (NSString *name in [[NSFileManager defaultManager] contentsOfDirectoryAtPath:root error:NULL]) {
+        if ([name hasPrefix:@"bbh-sticker-"]) [paths addObject:[root stringByAppendingPathComponent:name]];
+    }
+    return paths;
+}
+
+static NSString *SendRow(StickerChat *chat, NSDictionary *request, NSString *root,
+                         StickerCenter *center, Class message, NSString **guid) {
+    NSArray<NSString *> *attachmentGUIDs = @[@"stale"];
+    NSString *error = BBHSendStickerRow(chat, request, root, center, StickerTransfer.class, StickerItem.class, message, guid, &attachmentGUIDs);
+    if (error) assert(!attachmentGUIDs);
+    else assert([attachmentGUIDs isEqual:chat.message.item.transfers]);
+    return error;
+}
+
 int main(void) {
     @autoreleasepool {
         assert(BBHStickerNativeABI(StickerChat.class, StickerAccount.class, StickerCenter.class,
@@ -189,7 +238,8 @@ int main(void) {
         assert(BBHStickerSendingAvailable() == (BBH_EXPERIMENTAL_STICKERS == 1));
         NSDictionary *capabilities = BBHHelperCapabilities();
         assert([capabilities[@"stickerSending"] boolValue] == (BBH_EXPERIMENTAL_STICKERS == 1));
-        for (NSString *key in @[@"stickerReactions", @"stickerPlacement", @"stickerRows"]) assert(![capabilities[key] boolValue]);
+        assert([capabilities[@"stickerRows"] boolValue] == (BBH_EXPERIMENTAL_STICKERS == 1));
+        for (NSString *key in @[@"stickerReactions", @"stickerPlacement"]) assert(![capabilities[key] boolValue]);
 
         char templatePath[] = "/private/tmp/bbh-sticker-fixture.XXXXXXXX";
         assert(mkdtemp(templatePath)); NSString *root = [NSString stringWithUTF8String:templatePath];
@@ -278,10 +328,95 @@ int main(void) {
             assert([error containsString:@"unknown"] && chat.sends == 3 && !guid);
             BBHStickerRemoveSnapshot(center.transfer.localURL.path, root);
         } else assert(error && !guid && center.allocations == 0 && chat.sends == 0);
+        NSMutableArray *rowItems = [NSMutableArray new];
+        for (NSUInteger index = 0; index < 3; index++) [rowItems addObject:@{@"filePath": path,
+            @"filename": [NSString stringWithFormat:@"item-%lu.png", (unsigned long)index],
+            @"stickerLabel": [NSString stringWithFormat:@"Item %lu", (unsigned long)index]}];
+        NSDictionary *row = @{@"chatGuid": chat.guid, @"stickers": rowItems};
+        assert(BBHStickerRowRequestValid(row));
+        for (NSUInteger count = 0; count <= 11; count++) {
+            NSMutableArray *items = [NSMutableArray new];
+            for (NSUInteger i = 0; i < count; i++) [items addObject:rowItems[0]];
+            assert(BBHStickerRowRequestValid(@{@"chatGuid": chat.guid, @"stickers": items}) == (count >= 2 && count <= 10));
+        }
+        for (NSString *key in @[@"selectedMessageGuid", @"targetPartIndex", @"placement", @"message", @"effectId"]) {
+            NSMutableDictionary *invalid = [row mutableCopy]; invalid[key] = @"unsupported";
+            assert(!BBHStickerRowRequestValid(invalid));
+            NSMutableDictionary *badEntry = [rowItems[0] mutableCopy]; badEntry[key] = @"unsupported";
+            assert(!BBHStickerRowRequestValid(@{@"chatGuid": chat.guid, @"stickers": @[rowItems[0], badEntry]}));
+        }
+        assert(!BBHStickerRowRequestValid(@{@"chatGuid": chat.guid, @"stickers": @[@42, rowItems[0]]}));
+        chat.throwSend = NO; chat.changeGUID = NO; chat.sends = 0;
+        center = [StickerCenter new];
+        error = SendRow(chat, row, root, center, StickerMessage.class, &guid);
+        if (BBH_EXPERIMENTAL_STICKERS == 1) {
+            assert(!error && guid.length && [guid isEqual:chat.message.guid]);
+            assert(chat.sends == 1 && center.allocations == 3 && center.registrations == 3);
+            assert([chat.message.item.body.string isEqual:@"\ufffc\ufffc\ufffc"]);
+            assert([chat.message.item.transfers isEqual:center.registeredGUIDs]);
+            for (NSUInteger index = 0; index < 3; index++) {
+                NSAttributedString *body = chat.message.item.body;
+                assert([[body attribute:@"__kIMFileTransferGUIDAttributeName" atIndex:index effectiveRange:NULL]
+                    isEqual:chat.message.item.transfers[index]]);
+                assert([[body attribute:@"__kIMFilenameAttributeName" atIndex:index effectiveRange:NULL] isEqual:rowItems[index][@"filename"]]);
+                assert([[body attribute:@"__kIMMessagePartAttributeName" atIndex:index effectiveRange:NULL] isEqual:@0]);
+                assert([[body attribute:@"__kIMEmojiImageAttributeName" atIndex:index effectiveRange:NULL] isEqual:@1]);
+                assert([[body attribute:@"__kIMBaseWritingDirectionAttributeName" atIndex:index effectiveRange:NULL] isEqual:@(-1)]);
+                assert([BBHStickerRead(center.transfers[index].localURL.path, root) isEqual:png]);
+            }
+            for (NSString *snapshot in Snapshots(root)) BBHStickerRemoveSnapshot(snapshot, root);
+            for (NSUInteger index = 1; index <= 3; index++) {
+                NSMutableArray *badItems = [rowItems mutableCopy];
+                badItems[index - 1] = @{@"filePath": oversized};
+                center = [StickerCenter new]; chat.sends = 0;
+                error = SendRow(chat, @{@"chatGuid": chat.guid, @"stickers": badItems}, root, center, StickerMessage.class, &guid);
+                assert(error && !guid && center.allocations == 0 && center.registrations == 0 && chat.sends == 0 && Snapshots(root).count == 0);
+                center = [StickerCenter new]; center.failAllocationAt = index;
+                error = SendRow(chat, row, root, center, StickerMessage.class, &guid);
+                assert(error && ![error containsString:@"private"] && !guid && center.registrations == 0 && chat.sends == 0 && Snapshots(root).count == 0);
+                center = [StickerCenter new]; center.failLookupAt = index;
+                assert(SendRow(chat, row, root, center, StickerMessage.class, &guid));
+                assert(!guid && center.registrations == 0 && chat.sends == 0 && Snapshots(root).count == 0);
+                center = [StickerCenter new]; center.failStampAt = index;
+                error = SendRow(chat, row, root, center, StickerMessage.class, &guid);
+                assert(error && ![error containsString:@"private"] && !guid && center.registrations == 0 && chat.sends == 0 && Snapshots(root).count == 0);
+                center = [StickerCenter new]; center.failRegistrationAt = index;
+                error = SendRow(chat, row, root, center, StickerMessage.class, &guid);
+                assert([error containsString:@"unknown"] && !guid && center.allocations == 3 && center.registrations == index && chat.sends == 0);
+                assert(Snapshots(root).count == 3);
+                for (NSString *snapshot in Snapshots(root)) BBHStickerRemoveSnapshot(snapshot, root);
+            }
+            center = [StickerCenter new]; center.duplicateGUIDAt = 2;
+            assert(SendRow(chat, row, root, center, StickerMessage.class, &guid));
+            assert(!guid && center.registrations == 0 && chat.sends == 0 && Snapshots(root).count == 0);
+            NSString *readonlyDirectory = [root stringByAppendingPathComponent:@"readonly"];
+            assert(!mkdir(readonlyDirectory.fileSystemRepresentation, 0700));
+            NSString *readonlySource = [readonlyDirectory stringByAppendingPathComponent:@"source.png"];
+            FixtureWrite(png, readonlySource); assert(!chmod(readonlyDirectory.fileSystemRepresentation, 0500));
+            center = [StickerCenter new];
+            assert(SendRow(chat, @{@"chatGuid": chat.guid, @"stickers": @[rowItems[0], @{@"filePath": readonlySource}]},
+                root, center, StickerMessage.class, &guid));
+            assert(!guid && center.allocations == 0 && center.registrations == 0 && chat.sends == 0 && Snapshots(root).count == 0);
+            assert(!chmod(readonlyDirectory.fileSystemRepresentation, 0700));
+            assert(!unlink(readonlySource.fileSystemRepresentation)); assert(!rmdir(readonlyDirectory.fileSystemRepresentation));
+            center = [StickerCenter new];
+            assert(SendRow(chat, row, root, center, NilStickerMessage.class, &guid));
+            assert(!guid && center.registrations == 0 && chat.sends == 0 && Snapshots(root).count == 0);
+            NSMutableArray *ten = [NSMutableArray new];
+            for (NSUInteger index = 0; index < 10; index++) [ten addObject:rowItems[0]];
+            center = [StickerCenter new];
+            assert(!SendRow(chat, @{@"chatGuid": chat.guid, @"stickers": ten}, root, center, StickerMessage.class, &guid));
+            assert(guid.length && center.registrations == 10 && chat.sends == 1 && chat.message.item.transfers.count == 10);
+            for (NSString *snapshot in Snapshots(root)) BBHStickerRemoveSnapshot(snapshot, root);
+            chat.throwSend = YES; chat.sends = 0; center = [StickerCenter new];
+            error = SendRow(chat, row, root, center, StickerMessage.class, &guid);
+            assert([error containsString:@"unknown"] && !guid && chat.sends == 1 && center.registrations == 3 && Snapshots(root).count == 3);
+            for (NSString *snapshot in Snapshots(root)) BBHStickerRemoveSnapshot(snapshot, root);
+        } else assert(error && !guid && center.allocations == 0 && center.registrations == 0 && chat.sends == 0 && Snapshots(root).count == 0);
         assert([BBHStickerRead(path, root) isEqual:png]);
         for (NSString *file in files) assert(!unlink(file.fileSystemRepresentation));
         assert(!rmdir(root.fileSystemRepresentation));
-        puts("Sticker tests passed: compile-time gate, exact ABI, native service, image bounds, secure reads, byte preservation, metadata order, exact GUID, unknown outcomes.");
+        puts("Sticker tests passed: compile-time gate, exact ABI, native service, image bounds, secure reads, byte preservation, one-message row order/part/flags, metadata before registration, nth-item failures, exact GUID, unknown outcomes.");
     }
     return 0;
 }
