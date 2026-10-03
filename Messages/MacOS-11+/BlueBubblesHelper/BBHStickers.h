@@ -98,13 +98,20 @@ static inline NSString *BBHStickerRoot(void) {
         stringByAppendingPathComponent:@"Library/Messages/Attachments/BlueBubbles"];
 }
 
+static inline BOOL BBHStickerAbsolutePath(NSString *path) {
+    if (!BBHStickerString(path, 4096) || ![path hasPrefix:@"/"]) return NO;
+    NSArray *components = [path componentsSeparatedByString:@"/"];
+    for (NSUInteger index = 1; index < components.count; index++) {
+        NSString *component = components[index];
+        if (!component.length || [component isEqual:@"."] || [component isEqual:@".."]) return NO;
+    }
+    return YES;
+}
+
 // Walk every component using descriptors so ancestor and leaf symlinks fail.
 // root is injectable only for offline fixtures; the event always uses BBHStickerRoot.
 static inline int BBHStickerDirectory(NSString *directory, NSString *root) {
-    if (!BBHStickerString(directory, 4096) || !BBHStickerString(root, 4096)
-        || !directory.isAbsolutePath || !root.isAbsolutePath
-        || ![directory isEqual:directory.stringByStandardizingPath]
-        || ![root isEqual:root.stringByStandardizingPath]
+    if (!BBHStickerAbsolutePath(directory) || !BBHStickerAbsolutePath(root)
         || !([directory isEqual:root] || [directory hasPrefix:[root stringByAppendingString:@"/"]])) return -1;
     int fd = open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
     NSString *walked = @"";
@@ -126,7 +133,7 @@ static inline int BBHStickerDirectory(NSString *directory, NSString *root) {
 }
 
 static inline NSData *BBHStickerRead(NSString *path, NSString *root) {
-    if (!BBHStickerString(path, 4096) || ![path isEqual:path.stringByStandardizingPath]) return nil;
+    if (!BBHStickerAbsolutePath(path)) return nil;
     int directory = BBHStickerDirectory(path.stringByDeletingLastPathComponent, root);
     if (directory < 0) return nil;
     int fd = openat(directory, path.lastPathComponent.fileSystemRepresentation, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);

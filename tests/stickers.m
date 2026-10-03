@@ -215,6 +215,9 @@ int main(void) {
         assert([BBHStickerRead(path, root) isEqual:png]);
         assert(!BBHStickerRead(path, [root stringByAppendingString:@"-wrong"]));
         assert(!BBHStickerRead([root stringByAppendingPathComponent:@"../source.png"], root));
+        assert(!BBHStickerRead([root stringByAppendingString:@"//source.png"], root));
+        assert(!BBHStickerRead([root stringByAppendingString:@"/./source.png"], root));
+        assert(!BBHStickerRead([path stringByAppendingString:@"/"], root));
         NSString *symlinkPath = [root stringByAppendingPathComponent:@"leaf-symlink"];
         assert(!symlink(path.fileSystemRepresentation, symlinkPath.fileSystemRepresentation)); [files addObject:symlinkPath];
         assert(!BBHStickerRead(symlinkPath, root));
