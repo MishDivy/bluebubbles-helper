@@ -102,6 +102,13 @@ the Objective-C and ImageIO tests require macOS and have not run on this Linux
 workstation. Tests use generated images, temporary files, and synthetic objects;
 they never load private Messages frameworks or query real data.
 
+The metadata-only `scripts/probe-reactions.sh` also lists every selector used by
+the standalone sticker candidate. It does not create accounts, chats, transfers
+or messages. Run it on the target Mac only during a coordinated diagnostic;
+CI compiles this probe but does not execute it. Its exit status still describes
+emoji API availability, not sticker readiness. Compare the printed sticker
+signatures with `BBHStickers.h` before attempting native acceptance.
+
 Before deployment, require a native compile, synthetic test results, read-only
 signature evidence, artifact provenance, rollback preparation, and the user's
 approved acceptance window. A controlled standalone fixture must verify the

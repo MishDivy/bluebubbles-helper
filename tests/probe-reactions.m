@@ -46,17 +46,34 @@ int main(void) {
         printf("CKChatItem factory: %s\n", factory ? sel_getName(factory) : "unavailable");
         BOOL available = BBHCustomEmojiReactionsAvailable(chat, emoji, item);
         printf("Custom emoji native API available: %s; sticker reactions: unsupported.\n", available ? "yes" : "no");
-        // Inventory only the sticker-related declarations present upstream.
-        // Their existence does not establish a sticker send/removal contract.
-        const char *stickerClasses[] = {"CKMediaObjectManager", "CKMediaObjectManager", "CKComposition", "IMFileTransfer", "IMFileTransfer"};
-        const char *stickerSelectors[] = {"mediaObjectWithSticker:stickerUserInfo:",
-            "transferWithStickerFileURL:transferUserInfo:attributionInfo:",
-            "stickerCompositionWithMediaObjects:", "setIsSticker:", "setStickerUserInfo:"};
-        for (NSUInteger i = 0; i < 5; ++i) {
-            Class cls = objc_getClass(stickerClasses[i]);
-            SEL selector = sel_registerName(stickerSelectors[i]);
-            Method method = i == 2 ? class_getClassMethod(cls, selector) : class_getInstanceMethod(cls, selector);
-            printf("Sticker research only: %s %s ABI=%s\n", stickerClasses[i], stickerSelectors[i],
+        // Inventory the standalone candidate and the unverified placement APIs.
+        // Inspecting a selector never invokes it or establishes delivery support.
+        const struct { const char *name; const char *selector; BOOL factory; } stickerMethods[] = {
+            {"CKMediaObjectManager", "mediaObjectWithSticker:stickerUserInfo:", NO},
+            {"CKMediaObjectManager", "transferWithStickerFileURL:transferUserInfo:attributionInfo:", NO},
+            {"CKComposition", "stickerCompositionWithMediaObjects:", YES},
+            {"IMChatRegistry", "sharedInstance", YES},
+            {"IMChatRegistry", "existingChatWithGUID:", NO},
+            {"IMChat", "account", NO}, {"IMChat", "guid", NO}, {"IMChat", "sendMessage:", NO},
+            {"IMAccount", "serviceName", NO},
+            {"IMFileTransferCenter", "sharedInstance", YES},
+            {"IMFileTransferCenter", "guidForNewOutgoingTransferWithLocalURL:", NO},
+            {"IMFileTransferCenter", "transferForGUID:", NO},
+            {"IMFileTransferCenter", "registerTransferWithDaemon:", NO},
+            {"IMFileTransfer", "setIsSticker:", NO},
+            {"IMFileTransfer", "setStickerUserInfo:", NO},
+            {"IMFileTransfer", "setAttributionInfo:", NO},
+            {"IMFileTransfer", "guid", NO}, {"IMFileTransfer", "localURL", NO},
+            {"IMMessageItem", "initWithSender:time:body:attributes:fileTransferGUIDs:flags:error:guid:threadIdentifier:", NO},
+            {"IMMessageItem", "setBodyData:", NO},
+            {"IMMessage", "messageFromIMMessageItem:sender:subject:", YES},
+            {"IMMessage", "guid", NO},
+        };
+        for (NSUInteger i = 0; i < sizeof(stickerMethods) / sizeof(stickerMethods[0]); ++i) {
+            Class cls = objc_getClass(stickerMethods[i].name);
+            SEL selector = sel_registerName(stickerMethods[i].selector);
+            Method method = stickerMethods[i].factory ? class_getClassMethod(cls, selector) : class_getInstanceMethod(cls, selector);
+            printf("Sticker research only: %s %s ABI=%s\n", stickerMethods[i].name, stickerMethods[i].selector,
                 method ? method_getTypeEncoding(method) : "absent");
         }
         puts("No chats or accounts accessed; no sends performed. Delivery remains unverified.");
