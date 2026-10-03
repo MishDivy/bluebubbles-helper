@@ -1,4 +1,5 @@
 // Narrow backport of upstream development's emoji tapback path. No swizzling.
+#pragma once
 #import <Foundation/Foundation.h>
 #import <objc/message.h>
 #import <objc/runtime.h>

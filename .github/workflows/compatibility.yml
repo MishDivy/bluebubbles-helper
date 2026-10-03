@@ -12,3 +12,4 @@ jobs:
           persist-credentials: false
       - run: ./scripts/test-compatibility.sh
       - run: ./scripts/build-messages.sh
+      - run: BBH_EXPERIMENTAL_STICKERS=1 ./scripts/build-messages.sh
