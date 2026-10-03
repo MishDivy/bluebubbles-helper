@@ -23,6 +23,9 @@ enum { BBHStickerMaxBytes = 500 * 1024, BBHStickerMaxDimension = 618,
 - (instancetype)initWithSender:(id)sender time:(id)time body:(id)body attributes:(id)attributes
              fileTransferGUIDs:(id)transfers flags:(unsigned long long)flags error:(id)error
                           guid:(id)guid threadIdentifier:(id)thread;
+- (instancetype)initWithSender:(id)sender time:(id)time text:(id)text
+             fileTransferGUIDs:(id)transfers flags:(unsigned long long)flags error:(id)error
+                          guid:(id)guid subject:(id)subject threadIdentifier:(id)thread;
 @end
 
 static inline BOOL BBHStickerMethod(Class cls, NSString *name, BOOL factory,
@@ -39,6 +42,24 @@ static inline BOOL BBHStickerTransferABI(Class cls) {
         && BBHStickerMethod(cls, @"localURL", NO, "@", @[]);
 }
 
+static inline BOOL BBHStickerLegacyConstructionABI(Class item, Class message) {
+    return BBHStickerMethod(item, @"initWithSender:time:body:attributes:fileTransferGUIDs:flags:error:guid:threadIdentifier:", NO,
+        "@", @[@"@", @"@", @"@", @"@", @"@", @(@encode(unsigned long long)), @"@", @"@", @"@"])
+        && BBHStickerMethod(item, @"setBodyData:", NO, "v", @[@"@"])
+        && BBHStickerMethod(message, @"messageFromIMMessageItem:sender:subject:", YES, "@", @[@"@", @"@", @"@"]);
+}
+
+static inline BOOL BBHStickerDirectConstructionABI(Class item, Class message) {
+    return BBHStickerMethod(message, @"initWithSender:time:text:fileTransferGUIDs:flags:error:guid:subject:threadIdentifier:", NO,
+        "@", @[@"@", @"@", @"@", @"@", @(@encode(unsigned long long)), @"@", @"@", @"@", @"@"])
+        && BBHStickerMethod(message, @"_imMessageItem", NO, "@", @[])
+        && BBHStickerMethod(message, @"text", NO, "@", @[])
+        && BBHStickerMethod(message, @"fileTransferGUIDs", NO, "@", @[])
+        && BBHStickerMethod(message, @"flags", NO, @encode(unsigned long long), @[])
+        && BBHStickerMethod(item, @"body", NO, "@", @[])
+        && BBHStickerMethod(item, @"bodyData", NO, "@", @[]);
+}
+
 static inline BOOL BBHStickerNativeABI(Class chat, Class account, Class center,
                                       Class transfer, Class item, Class message) {
     return BBHStickerTransferABI(transfer)
@@ -50,10 +71,7 @@ static inline BOOL BBHStickerNativeABI(Class chat, Class account, Class center,
         && BBHStickerMethod(center, @"guidForNewOutgoingTransferWithLocalURL:", NO, "@", @[@"@"])
         && BBHStickerMethod(center, @"transferForGUID:", NO, "@", @[@"@"])
         && BBHStickerMethod(center, @"registerTransferWithDaemon:", NO, "v", @[@"@"])
-        && BBHStickerMethod(item, @"initWithSender:time:body:attributes:fileTransferGUIDs:flags:error:guid:threadIdentifier:", NO,
-                             "@", @[@"@", @"@", @"@", @"@", @"@", @(@encode(unsigned long long)), @"@", @"@", @"@"])
-        && BBHStickerMethod(item, @"setBodyData:", NO, "v", @[@"@"])
-        && BBHStickerMethod(message, @"messageFromIMMessageItem:sender:subject:", YES, "@", @[@"@", @"@", @"@"])
+        && (BBHStickerLegacyConstructionABI(item, message) || BBHStickerDirectConstructionABI(item, message))
         && BBHStickerMethod(message, @"guid", NO, "@", @[]);
 }
 
@@ -301,6 +319,43 @@ static inline NSDictionary *BBHStickerStamp(id transfer, NSData *data, NSDiction
     return info;
 }
 
+static inline id BBHStickerConstructMessage(Class itemClass, Class messageClass, NSAttributedString *body,
+                                            NSArray *transfers, NSString *expectedGUID) {
+    id message;
+    if (BBHStickerLegacyConstructionABI(itemClass, messageClass)) {
+        id item = [[itemClass alloc] initWithSender:nil time:NSDate.date body:body attributes:nil
+            fileTransferGUIDs:transfers flags:0x100005ULL error:nil guid:expectedGUID threadIdentifier:nil];
+        if (![item isKindOfClass:itemClass] || !BBHStickerMethod([item class], @"setBodyData:", NO, "v", @[@"@"])) return nil;
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+        NSData *bodyData = [NSArchiver archivedDataWithRootObject:body];
+#pragma clang diagnostic pop
+        if (!bodyData.length) return nil;
+        ((void (*)(id, SEL, id))objc_msgSend)(item, NSSelectorFromString(@"setBodyData:"), bodyData);
+        message = ((id (*)(id, SEL, id, id, id))objc_msgSend)(messageClass,
+            NSSelectorFromString(@"messageFromIMMessageItem:sender:subject:"), item, nil, nil);
+    } else if (BBHStickerDirectConstructionABI(itemClass, messageClass)) {
+        message = [[messageClass alloc] initWithSender:nil time:NSDate.date text:body
+            fileTransferGUIDs:transfers flags:0x100005ULL error:nil guid:expectedGUID subject:nil threadIdentifier:nil];
+        if (![message isKindOfClass:messageClass]
+            || !BBHStickerDirectConstructionABI(itemClass, [message class])
+            || !BBHStickerMethod([message class], @"guid", NO, "@", @[])
+            || ![BBHStickerObject(message, @"guid") isEqual:expectedGUID]
+            || ![BBHStickerObject(message, @"text") isEqual:body]
+            || ![BBHStickerObject(message, @"fileTransferGUIDs") isEqual:transfers]
+            || ((unsigned long long (*)(id, SEL))objc_msgSend)(message, NSSelectorFromString(@"flags")) != 0x100005ULL) return nil;
+        id item = BBHStickerObject(message, @"_imMessageItem");
+        if (![item isKindOfClass:itemClass]
+            || !BBHStickerDirectConstructionABI([item class], [message class])
+            || ![BBHStickerObject(item, @"body") isEqual:body]) return nil;
+        // IMCore generates a fresh serialized item from the attributed text.
+        id bodyData = BBHStickerObject(item, @"bodyData");
+        if (![bodyData isKindOfClass:NSData.class] || ![bodyData length] || [bodyData length] > 1024 * 1024) return nil;
+    } else return nil;
+    return [message isKindOfClass:messageClass] && BBHStickerMethod([message class], @"guid", NO, "@", @[])
+        && [BBHStickerObject(message, @"guid") isEqual:expectedGUID] ? message : nil;
+}
+
 // Returns an exact constructed IMMessage GUID after one dispatch. Any error
 // after registration may have an unknown outcome and must never trigger retry.
 static inline NSString *BBHSendStickerSet(id chat, NSString *chatGUID, NSArray<NSDictionary *> *requests,
@@ -352,24 +407,8 @@ static inline NSString *BBHSendStickerSet(id chat, NSString *chatGUID, NSArray<N
                 @"__kIMEmojiImageAttributeName": @1}]];
         }
         NSString *expectedGUID = NSUUID.UUID.UUIDString;
-        id item = [[itemClass alloc] initWithSender:nil time:NSDate.date body:body attributes:nil
-            fileTransferGUIDs:transferGUIDs flags:0x100005ULL error:nil guid:expectedGUID threadIdentifier:nil];
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-        NSData *bodyData = [NSArchiver archivedDataWithRootObject:body];
-#pragma clang diagnostic pop
-        if (!bodyData.length) return @"Unable to construct native sticker message";
-        if (!item || ![item isKindOfClass:itemClass]
-            || !BBHStickerMethod([item class], @"setBodyData:", NO, "v", @[@"@"])) {
-            return @"Unable to construct native sticker message";
-        }
-        ((void (*)(id, SEL, id))objc_msgSend)(item, NSSelectorFromString(@"setBodyData:"), bodyData);
-        id message = ((id (*)(id, SEL, id, id, id))objc_msgSend)(messageClass,
-            NSSelectorFromString(@"messageFromIMMessageItem:sender:subject:"), item, nil, nil);
-        if (!message || !BBHStickerMethod([message class], @"guid", NO, "@", @[])
-            || ![BBHStickerObject(message, @"guid") isEqual:expectedGUID]) {
-            return @"Unable to construct native sticker message";
-        }
+        id message = BBHStickerConstructMessage(itemClass, messageClass, [body copy], [transferGUIDs copy], expectedGUID);
+        if (!message) return @"Unable to construct native sticker message";
         registered = YES;
         for (NSString *transferGUID in transferGUIDs)
             ((void (*)(id, SEL, id))objc_msgSend)(center, NSSelectorFromString(@"registerTransferWithDaemon:"), transferGUID);

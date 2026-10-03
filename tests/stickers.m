@@ -141,10 +141,78 @@
 }
 @end
 
+static NSUInteger directConstructionMode, directConstructionCalls;
+@interface DirectStickerMessage : NSObject
+@property NSString *guid;
+@property NSAttributedString *text;
+@property NSArray *fileTransferGUIDs;
+@property unsigned long long flags;
+@property StickerItem *item;
+@end
+@implementation DirectStickerMessage
+- (instancetype)initWithSender:(id)sender time:(id)time text:(id)text
+             fileTransferGUIDs:(id)transfers flags:(unsigned long long)flags error:(id)error
+                          guid:(id)guid subject:(id)subject threadIdentifier:(id)thread {
+    directConstructionCalls++;
+    assert(!sender && time && flags == 0x100005ULL && !error && !subject && !thread);
+    if (directConstructionMode == 1) return nil;
+    if (directConstructionMode == 2) return (id)[NSObject new];
+    if (directConstructionMode == 10) [NSException raise:@"Synthetic" format:@"private construction details"];
+    if (directConstructionMode == 11) return (id)[NSClassFromString(@"WrongDirectStickerMessage") new];
+    self = [super init];
+    if (self) {
+        self.guid = directConstructionMode == 3 ? @"wrong-guid" : guid;
+        self.text = directConstructionMode == 4 ? [[NSAttributedString alloc] initWithString:@"wrong-body"] : text;
+        self.fileTransferGUIDs = directConstructionMode == 5 ? [[transfers reverseObjectEnumerator] allObjects] : transfers;
+        self.flags = directConstructionMode == 6 ? 0 : flags;
+        self.item = directConstructionMode == 7 ? (id)[NSObject new]
+            : directConstructionMode == 14 ? nil
+            : directConstructionMode == 15 ? [NSClassFromString(@"WrongBodyStickerItem") new] : [StickerItem new];
+        if (directConstructionMode != 7) {
+            self.item.guid = guid; self.item.transfers = transfers;
+            self.item.body = directConstructionMode == 8 ? [[NSAttributedString alloc] initWithString:@"wrong-body"] : text;
+            self.item.bodyData = directConstructionMode == 9 ? [NSData data] : [NSArchiver archivedDataWithRootObject:text];
+            if (directConstructionMode == 12) self.item.bodyData = [NSMutableData dataWithLength:1024 * 1024 + 1];
+            if (directConstructionMode == 13) self.item.bodyData = (id)@"not-data";
+        }
+    }
+    return self;
+}
+- (id)_imMessageItem { return self.item; }
+@end
+
+@interface WrongDirectStickerMessage : DirectStickerMessage @end
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wmismatched-return-types"
+@implementation WrongDirectStickerMessage
+- (double)flags { assert(0); return 0; }
+@end
+#pragma clang diagnostic pop
+
+@interface WrongBodyStickerItem : StickerItem @end
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wmismatched-return-types"
+@implementation WrongBodyStickerItem
+- (double)body { assert(0); return 0; }
+@end
+#pragma clang diagnostic pop
+
+// A valid direct initializer must not become a retry after legacy construction fails.
+static BOOL bothFactoryReturnsNil;
+@interface BothStickerMessage : DirectStickerMessage @end
+@implementation BothStickerMessage
++ (id)messageFromIMMessageItem:(StickerItem *)item sender:(id)sender subject:(id)subject {
+    assert(!sender && !subject && item.bodyData.length);
+    if (bothFactoryReturnsNil) return nil;
+    BothStickerMessage *message = [self new]; message.guid = item.guid; message.text = item.body;
+    message.fileTransferGUIDs = item.transfers; message.flags = 0x100005ULL; message.item = item; return message;
+}
+@end
+
 static NSData *Image(NSUInteger width, NSUInteger height, NSUInteger count, NSString *type) {
     CGColorSpaceRef space = CGColorSpaceCreateDeviceRGB();
     CGContextRef context = CGBitmapContextCreate(NULL, width, height, 8, width * 4, space,
-        kCGImageAlphaPremultipliedLast);
+        (CGBitmapInfo)kCGImageAlphaPremultipliedLast);
     assert(context); CGColorSpaceRelease(space);
     CGContextSetRGBFillColor(context, 0.5, 0.25, 0.75, 0.5);
     CGContextFillRect(context, CGRectMake(0, 0, width, height));
@@ -227,6 +295,12 @@ int main(void) {
             StickerTransfer.class, StickerItem.class, StickerMessage.class));
         assert(!BBHStickerNativeABI(Nil, StickerAccount.class, StickerCenter.class,
             StickerTransfer.class, StickerItem.class, StickerMessage.class));
+        assert(BBHStickerDirectConstructionABI(StickerItem.class, DirectStickerMessage.class));
+        assert(!BBHStickerLegacyConstructionABI(StickerItem.class, DirectStickerMessage.class));
+        assert(BBHStickerNativeABI(StickerChat.class, StickerAccount.class, StickerCenter.class,
+            StickerTransfer.class, StickerItem.class, DirectStickerMessage.class));
+        assert(!BBHStickerDirectConstructionABI(StickerItem.class, WrongDirectStickerMessage.class));
+        assert(!BBHStickerDirectConstructionABI(NSObject.class, DirectStickerMessage.class));
         assert(!BBHStickerSendingAvailable());
         NSDictionary *nativeClasses = @{@"IMChat": StickerChat.class, @"IMAccount": StickerAccount.class,
             @"IMFileTransferCenter": StickerCenter.class, @"IMFileTransfer": StickerTransfer.class,
@@ -334,6 +408,45 @@ int main(void) {
             @"stickerLabel": [NSString stringWithFormat:@"Item %lu", (unsigned long)index]}];
         NSDictionary *row = @{@"chatGuid": chat.guid, @"stickers": rowItems};
         assert(BBHStickerRowRequestValid(row));
+        chat.throwSend = NO; chat.changeGUID = NO; chat.sends = 0; directConstructionMode = 0;
+        center = [StickerCenter new];
+        error = Send(chat, request, root, center, DirectStickerMessage.class, &guid);
+        if (BBH_EXPERIMENTAL_STICKERS == 1) {
+            assert(!error && guid.length && chat.sends == 1 && center.registrations == 1 && directConstructionCalls == 1);
+            assert([[chat.message.item.body attribute:@"__kIMEmojiImageAttributeName" atIndex:0 effectiveRange:NULL] isEqual:@1]);
+            for (NSString *snapshot in Snapshots(root)) BBHStickerRemoveSnapshot(snapshot, root);
+            center = [StickerCenter new]; chat.sends = 0;
+            assert(!SendRow(chat, row, root, center, DirectStickerMessage.class, &guid));
+            assert(chat.sends == 1 && center.registrations == 3 && [chat.message.item.transfers isEqual:center.registeredGUIDs]);
+            for (NSUInteger index = 0; index < 3; index++) {
+                NSAttributedString *body = chat.message.item.body;
+                assert([[body attribute:@"__kIMFileTransferGUIDAttributeName" atIndex:index effectiveRange:NULL]
+                    isEqual:chat.message.item.transfers[index]]);
+                assert([[body attribute:@"__kIMFilenameAttributeName" atIndex:index effectiveRange:NULL] isEqual:rowItems[index][@"filename"]]);
+                assert([[body attribute:@"__kIMMessagePartAttributeName" atIndex:index effectiveRange:NULL] isEqual:@0]);
+                assert([[body attribute:@"__kIMEmojiImageAttributeName" atIndex:index effectiveRange:NULL] isEqual:@1]);
+                assert([[body attribute:@"__kIMBaseWritingDirectionAttributeName" atIndex:index effectiveRange:NULL] isEqual:@(-1)]);
+            }
+            for (NSString *snapshot in Snapshots(root)) BBHStickerRemoveSnapshot(snapshot, root);
+            for (directConstructionMode = 1; directConstructionMode <= 15; directConstructionMode++) {
+                center = [StickerCenter new]; chat.sends = 0;
+                NSUInteger previousCalls = directConstructionCalls;
+                error = SendRow(chat, row, root, center, DirectStickerMessage.class, &guid);
+                assert(error && ![error containsString:@"private"] && !guid && center.registrations == 0 && chat.sends == 0);
+                assert(directConstructionCalls == previousCalls + 1 && Snapshots(root).count == 0);
+            }
+            directConstructionMode = 0; center = [StickerCenter new];
+            NSUInteger previousCalls = directConstructionCalls;
+            assert(!SendRow(chat, row, root, center, BothStickerMessage.class, &guid));
+            assert(guid.length && center.registrations == 3 && chat.sends == 1 && directConstructionCalls == previousCalls);
+            for (NSString *snapshot in Snapshots(root)) BBHStickerRemoveSnapshot(snapshot, root);
+            bothFactoryReturnsNil = YES; center = [StickerCenter new]; chat.sends = 0;
+            assert(SendRow(chat, row, root, center, BothStickerMessage.class, &guid));
+            assert(!guid && center.registrations == 0 && chat.sends == 0 && directConstructionCalls == previousCalls && Snapshots(root).count == 0);
+            center = [StickerCenter new];
+            assert(SendRow(chat, row, root, center, WrongDirectStickerMessage.class, &guid));
+            assert(!guid && center.allocations == 0 && center.registrations == 0 && directConstructionCalls == previousCalls);
+        } else assert(error && !guid && center.allocations == 0 && chat.sends == 0 && directConstructionCalls == 0);
         for (NSUInteger count = 0; count <= 11; count++) {
             NSMutableArray *items = [NSMutableArray new];
             for (NSUInteger i = 0; i < count; i++) [items addObject:rowItems[0]];

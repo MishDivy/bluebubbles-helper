@@ -15,7 +15,7 @@ case "${1:-macos}" in
             -isystem "$support/usr/include" -iframework "$support/System/Library/Frameworks"
             -L"$support/usr/lib" -F"$support/System/Library/Frameworks")
         ;;
-    *) echo 'Usage: bash scripts/probe-stickers.sh [macos|maccatalyst] [metadata|sizing|preview-scale|geometry|tapback]' >&2; exit 2 ;;
+    *) echo 'Usage: bash scripts/probe-stickers.sh [macos|maccatalyst] [metadata|sizing|preview-scale|geometry|tapback|construction]' >&2; exit 2 ;;
 esac
 case "${2:-metadata}" in
     metadata) source_file="$root/tests/probe-stickers.m" ;;
@@ -23,7 +23,8 @@ case "${2:-metadata}" in
     preview-scale) source_file="$root/tests/probe-sticker-preview-scale.m" ;;
     geometry) source_file="$root/tests/probe-sticker-geometry.m" ;;
     tapback) source_file="$root/tests/probe-sticker-tapback.m" ;;
-    *) echo 'Probe must be metadata, sizing, preview-scale, geometry, or tapback.' >&2; exit 2 ;;
+    construction) source_file="$root/tests/probe-sticker-construction.m" ;;
+    *) echo 'Probe must be metadata, sizing, preview-scale, geometry, tapback, or construction.' >&2; exit 2 ;;
 esac
 probe_dir=$(mktemp -d "${TMPDIR:-/tmp}/bbh-stickers-probe.XXXXXXXX")
 trap 'rm -f "$probe_dir/probe"; rmdir "$probe_dir"' EXIT

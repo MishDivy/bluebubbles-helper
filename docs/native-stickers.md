@@ -42,10 +42,13 @@ transfer points at a private snapshot. Errors return neither message nor
 attachment GUIDs.
 
 Every error uses a fixed string without native exception details, chat IDs, or
-paths. The helper constructs an `IMMessageItem`, writes its attributed body as
-typedstream data, wraps that item in an `IMMessage`, and requires that object's
-GUID to equal the construction GUID before registering or sending. It reads the
-same object after dispatch. It never consults `lastSentMessage`. This response
+paths. On the legacy ABI, the helper constructs an `IMMessageItem`, writes its
+attributed body as typedstream data, and wraps it in an `IMMessage`. On the direct
+initializer ABI, it constructs an `IMMessage` from immutable attributed text and
+ordered transfer GUIDs, then checks its generated item's body and bounded,
+nonempty serialized body data. Both paths require the constructed message's GUID
+to equal the construction GUID before registering or sending. The helper reads
+the same message object after dispatch. It never consults `lastSentMessage`. This response
 acknowledges local native dispatch; the server must verify the row and attachment,
 and recipient delivery requires a controlled acceptance test.
 
@@ -54,11 +57,42 @@ and recipient delivery requires a controlled acceptance test.
 `stickerRows` are true only
 when `BBH_EXPERIMENTAL_STICKERS=1` at compile time and every used private selector
 matches its full return and argument ABI. The guard covers the registry, chat,
-account, transfer center, transfer, message item, and message factory/getter.
+account, transfer center, transfer, message item, and selected message constructor
+and getters. An exact legacy ABI takes precedence over the exact direct ABI.
+A constructor failure cannot switch paths or trigger another send attempt.
 The sticker Boolean setter supports C `bool` and signed `char` encodings using
 the corresponding function type; other scalar encodings fail. Runtime checks
 repeat on the actual chat, account, center, transfer, and constructed message.
 The unavailable `transferWithStickerFileURL:...` factory is not used.
+
+## Direct construction compatibility evidence
+
+An isolated metadata probe on macOS 27.0.1 found the legacy
+`IMMessage +messageFromIMMessageItem:sender:subject:` factory absent. Every other
+standalone and row guard matched, including the message-item initializer's object
+`error` argument. The replacement five-argument factory has additional
+`accountController` and `itemCreator` dependencies whose nil behavior is unknown;
+this implementation does not use it.
+
+The verified direct initializer is
+`initWithSender:time:text:fileTransferGUIDs:flags:error:guid:subject:threadIdentifier:`,
+with arm64 encoding `@88@0:8@16@24@32@40Q48@56@64@72@80`.
+The isolated `tests/probe-sticker-construction.m` uses only generated standalone
+and two-item row bodies and nonexistent synthetic transfer IDs. Native
+construction retained the explicit GUID, flags, attributed text and transfer
+order. Initial and repeated `_imMessageItem` reads contained nonempty typedstream
+archives that decoded exactly to those generated bodies, including every required
+per-character attribute. The getter returned different item objects. An explicitly
+stamped archive did not persist; regenerated native archives still decoded to the
+same body. The final probe, which performed no archive writes, passed for both
+standalone and row bodies. The modern path therefore leaves
+serialization to the verified native initializer and does not stamp a transient
+item. The legacy path retains its explicit archive write.
+
+This probe did not resolve chats or accounts, create or register file transfers,
+or send messages. Construction and serialization evidence do not establish
+recipient delivery or sticker rendering; controlled self-chat acceptance remains
+required. The unrelated placement path is unchanged.
 
 ## Targeted sticker tapbacks
 

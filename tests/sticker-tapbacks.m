@@ -260,7 +260,7 @@ int main(void) {
         assert(mkdtemp(directory)); NSString *root = [NSString stringWithUTF8String:directory];
         NSString *path = [root stringByAppendingPathComponent:@"synthetic.png"];
         CGColorSpaceRef space = CGColorSpaceCreateDeviceRGB();
-        CGContextRef context = CGBitmapContextCreate(NULL, 2, 2, 8, 8, space, kCGImageAlphaPremultipliedLast);
+        CGContextRef context = CGBitmapContextCreate(NULL, 2, 2, 8, 8, space, (CGBitmapInfo)kCGImageAlphaPremultipliedLast);
         assert(context); CGImageRef frame = CGBitmapContextCreateImage(context);
         NSMutableData *png = [NSMutableData new];
         CGImageDestinationRef destination = CGImageDestinationCreateWithData((__bridge CFMutableDataRef)png, CFSTR("public.png"), 1, NULL);
