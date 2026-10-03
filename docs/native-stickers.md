@@ -2,8 +2,10 @@
 
 This feature branch implements one standalone native sticker per request in the
 released helper's existing transport. Production builds keep sticker sending
-disabled. No installed helper, account, Messages database, or native conversation
-was accessed or changed during implementation.
+disabled. The initial implementation used public reference source and synthetic
+tests, without accessing an installed helper, account, Messages database, or
+native conversation. Later, separately authorized read-only inspection of
+user-created fixtures supplied the sanitized evidence below.
 
 ## Contract and capability
 
@@ -62,8 +64,9 @@ The transfer initially points at that snapshot in the Messages Attachments tree.
 Its native GUID and local URL must match. The helper sets `isSticker`,
 `stickerUserInfo`, and `attributionInfo` before message construction and daemon
 registration. Its standalone body contains one attachment placeholder at part 0
-with the native transfer GUID. The ordinary attachment implementation remains
-separate and unchanged.
+with the native transfer GUID, numeric writing direction `-1`, and
+`__kIMEmojiImageAttributeName` set to `1`. The ordinary attachment implementation
+remains separate and unchanged.
 
 Preparation failures remove only the helper-created snapshot. Once registration
 begins, any exception or changed GUID reports an unknown outcome and retains the
@@ -86,6 +89,57 @@ fields remain opaque. The helper never creates a target association or exposes
 a placement transform. This adaptation still requires native validation on the
 chosen OS and controlled standalone fixtures. Existing macOS 27 probes found
 sticker setters but did not establish delivery or metadata compatibility.
+
+## Controlled fixture evidence
+
+The user created these native iPad self-chat fixtures. Read-only inspection found
+one three-sticker row represented by one message with three sticker attachments
+and `part_count=1`. Its attributed body contains three U+FFFC characters, each
+with a distinct transfer GUID and `__kIMMessagePartAttributeName=0`. All three
+characters have `__kIMEmojiImageAttributeName=1` and writing direction `-1`.
+A standalone Bippy sticker has the same body attributes. This evidence supports
+the standalone emoji-image attribute and a future row body with all attachments
+in part 0. Row sending remains disabled.
+
+Two placements on one text message are independent rows, each with its own
+attachment, association type `1000`, and a part-0 reference to the same target.
+Neither placement body has `__kIMEmojiImageAttributeName`. Their sticker metadata
+uses strings for `sro`, `ssa`, `spw`, `sxs`, `sys`, `sai`, and `sli`, a Boolean for
+`sir`, and an integer for `spv`. Source keys include `pid`, `sid`, and `shash`.
+Coordinate units and transform semantics remain unverified. Placement sending
+and removal remain disabled.
+[Apple's iPad guide](https://support.apple.com/guide/ipad/send-stickers-ipaddca01563/ipados)
+describes Sticker Details, swipe left, Delete as removing the sticker on that
+iPad only. This is a local deletion action, not evidence of remote unsend or a
+type-1000 removal transport event. A controlled deletion observation must check
+local and synced outcomes separately. After the user removed duplicate placements
+and left one rotated sticker on the iPad, the sampled Mac placement rows and
+their self-received copies remained present, with unchanged attachment visibility
+and no retraction/update flags or new related removal event. This snapshot is
+consistent with iPad-local removal; it does not establish a remote deletion API.
+
+The observed row and standalone assets are HEIC; the placement assets are PNG.
+The helper still accepts only PNG/APNG/GIF/JPEG. HEIC support needs separate
+validation for decoding, metadata, effects, and byte preservation. The fixtures'
+source and attribution identify Bippy; they do not establish a generic Apple
+Stickers source identity. This correction does not change transfer source metadata.
+
+The synced attachment rows have `is_outgoing=0` while their messages have
+`is_from_me=1`. Attachment transfer direction cannot establish message authorship.
+Confirmation uses message sender/chat identity and attachment linkage/sticker
+status; it must not require the attachment's outgoing flag to match the message.
+
+Fixture inspection must use explicit column and decoded-field allowlists, scoped
+to the user's selected fixtures: message ownership, association type/part,
+part count and attributed-body fields; attachment linkage, sticker status,
+format/dimensions and transfer direction; and approved source/geometry fields
+from `sticker_user_info` and attribution. Never select, decode, or print
+`attachment.user_info`, which contains private transport material. Never use
+`SELECT *`. Keep private identifiers, raw message text, hashes, artwork, and
+transport metadata out of committed documentation and fixtures. The account
+above records structure and field types only.
+
+## Validation and acceptance
 
 Build and synthetic checks use the safe scripts, which never install or restart:
 
@@ -116,8 +170,8 @@ exact row, chat, sender, service, `is_sticker`, metadata, attachment bytes and b
 clients' rendering, including animation and transparency. The helper's capability
 advertises a matching API, not successful delivery.
 
-Full parity needs separately approved native fixtures for standalone sticker
-rows and hydration, placements and multiple overlays, transforms, removal,
+Full parity still needs native send-path acceptance and separately approved
+fixture coverage for hydration, placement transforms, removal,
 2007/3007 sticker tapbacks and replacement, multipart targets, animation,
 and effects. Preserve observed association types and opaque metadata until those
 schemas and native constructor/removal signatures are verified. Do not derive

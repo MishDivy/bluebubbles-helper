@@ -308,8 +308,9 @@ static inline NSString *BBHSendSticker(id chat, NSDictionary *request, NSString 
         NSString *filename = request[@"filename"] ?: [@"sticker." stringByAppendingString:image[@"extension"]];
         BBHStickerStamp(transfer, data, image, snapshot.lastPathComponent, request[@"stickerLabel"]);
         NSAttributedString *body = [[NSAttributedString alloc] initWithString:@"\ufffc" attributes:@{
-            @"__kIMBaseWritingDirectionAttributeName": @"-1", @"__kIMFileTransferGUIDAttributeName": transferGUID,
-            @"__kIMFilenameAttributeName": filename, @"__kIMMessagePartAttributeName": @0}];
+            @"__kIMBaseWritingDirectionAttributeName": @(-1), @"__kIMFileTransferGUIDAttributeName": transferGUID,
+            @"__kIMFilenameAttributeName": filename, @"__kIMMessagePartAttributeName": @0,
+            @"__kIMEmojiImageAttributeName": @1}];
         NSString *expectedGUID = NSUUID.UUID.UUIDString;
         id item = [[itemClass alloc] initWithSender:nil time:NSDate.date body:body attributes:nil
             fileTransferGUIDs:@[transferGUID] flags:0x100005ULL error:nil guid:expectedGUID threadIdentifier:nil];

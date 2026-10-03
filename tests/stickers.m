@@ -256,6 +256,8 @@ int main(void) {
             assert([center.transfer.stickerUserInfo[@"shash"] isEqual:BBHStickerDigest(png, YES)]);
             assert([center.transfer.attributionInfo[@"accessl"] isEqual:request[@"stickerLabel"]]);
             assert([[chat.message.item.body attribute:@"__kIMFilenameAttributeName" atIndex:0 effectiveRange:NULL] isEqual:request[@"filename"]]);
+            assert([[chat.message.item.body attribute:@"__kIMEmojiImageAttributeName" atIndex:0 effectiveRange:NULL] isEqual:@1]);
+            assert([[chat.message.item.body attribute:@"__kIMBaseWritingDirectionAttributeName" atIndex:0 effectiveRange:NULL] isEqual:@(-1)]);
             BBHStickerRemoveSnapshot(center.transfer.localURL.path, root);
             chat.account.serviceName = @"SMS";
             assert(Send(chat, request, root, center, StickerMessage.class, &guid) && !guid && chat.sends == 1);
