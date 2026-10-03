@@ -12,6 +12,7 @@
 #import "Logging.h"
 #import "BBHReactions.h"
 #import "BBHStickerTapbacks.h"
+#import "BBHStickerPlacements.h"
 
 @implementation NetworkController
 
@@ -79,11 +80,13 @@ static id sharedInstance = nil;
 
 - (void)socket:(GCDAsyncSocket *)sock didConnectToHost:(NSString *)host port:(UInt16)port {
     DLog("BLUEBUBBLESHELPER: socket:%{public}p didConnectToHost:%{public}@ port:%{public}hu", sock, host, port);
+    NSMutableDictionary *capabilities = [BBHNativeStickerCapabilities() mutableCopy];
+    capabilities[@"stickerPlacement"] = @(BBHStickerPlacementAvailable());
     NSDictionary *message = @{
         @"event": @"ping",
         @"message": @"Helper Connected!",
         @"process": [[NSBundle mainBundle] bundleIdentifier],
-        @"capabilities": BBHNativeStickerCapabilities(),
+        @"capabilities": capabilities,
     };
     [self sendMessage:message];
 }

@@ -27,6 +27,7 @@
 #import "BBHCompatibility.h"
 #import "BBHReactions.h"
 #import "BBHStickerTapbacks.h"
+#import "BBHStickerPlacements.h"
 #import "IMHandleRegistrar.h"
 #import "IMCore.h"
 #import "IMChatHistoryController.h"
@@ -351,8 +352,10 @@ NSMutableArray* vettedAliases;
             }
             [[NetworkController sharedInstance] sendMessage:response];
         }
-    } else if ([event isEqualToString:@"send-sticker-tapback"] || [event isEqualToString:@"remove-sticker-tapback"]) {
+    } else if ([event isEqualToString:@"send-sticker-tapback"] || [event isEqualToString:@"remove-sticker-tapback"]
+               || [event isEqualToString:@"send-sticker-placement"]) {
         BOOL remove = [event isEqualToString:@"remove-sticker-tapback"];
+        BOOL placement = [event isEqualToString:@"send-sticker-placement"];
         void (^respond)(NSString *, NSString *) = ^(NSString *error, NSString *guid) {
             if (!transaction) return;
             NSDictionary *response = error ? @{@"transactionId": transaction, @"error": error}
@@ -360,8 +363,10 @@ NSMutableArray* vettedAliases;
             [[NetworkController sharedInstance] sendMessage:response];
         };
         @try {
-            if (!BBHStickerTapbackRequestValid(data, remove)) respond(@"Invalid sticker reaction request", nil);
-            else if (!BBHStickerReactionsAvailable()) respond(@"Native sticker reactions are unavailable", nil);
+            if (placement ? !BBHStickerPlacementRequestValid(data) : !BBHStickerTapbackRequestValid(data, remove))
+                respond(placement ? @"Invalid sticker placement request" : @"Invalid sticker reaction request", nil);
+            else if (placement ? !BBHStickerPlacementAvailable() : !BBHStickerReactionsAvailable())
+                respond(placement ? @"Native sticker placement is unavailable" : @"Native sticker reactions are unavailable", nil);
             else {
                 id chat = [[IMChatRegistry sharedInstance] existingChatWithGUID:data[@"chatGuid"]];
                 id history = BBHStickerObject(NSClassFromString(@"IMChatHistoryController"), @"sharedInstance");
@@ -369,10 +374,12 @@ NSMutableArray* vettedAliases;
                 NSString *root = BBHStickerRoot();
                 BBHLoadStickerTarget(chat, data[@"selectedMessageGuid"], [data[@"partIndex"] integerValue], history,
                     NSClassFromString(@"IMAggregateAttachmentMessagePartChatItem"), 10000, ^(id part, NSRange range, NSString *error) {
-                        (void)range;
                         if (error) { respond(error, nil); return; }
                         NSString *guid = nil;
-                        NSString *sendError = BBHSendStickerTapback(chat, part, data, remove, root,
+                        NSString *sendError = placement ? BBHSendStickerPlacement(chat, part, range, data, root,
+                            center, NSClassFromString(@"IMFileTransfer"), NSClassFromString(@"IMMessageItem"),
+                            NSClassFromString(@"IMMessage"), &guid)
+                            : BBHSendStickerTapback(chat, part, data, remove, root,
                             center, NSClassFromString(@"IMFileTransfer"),
                             NSClassFromString(@"IMStickerTapback"), NSClassFromString(@"IMTapbackSender"),
                             NSClassFromString(@"IMAssociatedMessageChatItem"), NSClassFromString(@"IMAggregateAcknowledgmentChatItem"),
@@ -381,7 +388,7 @@ NSMutableArray* vettedAliases;
                     });
             }
         } @catch (NSException *exception) {
-            (void)exception; respond(@"Native sticker reaction preparation failed", nil);
+            (void)exception; respond(placement ? @"Native sticker placement preparation failed" : @"Native sticker reaction preparation failed", nil);
         }
     // If the server tells us to edit a message
     } else if ([event isEqualToString:@"edit-message"]) {

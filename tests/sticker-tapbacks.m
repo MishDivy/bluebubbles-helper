@@ -1,4 +1,4 @@
-#import "BBHStickerTapbacks.h"
+#import "BBHStickerPlacements.h"
 #include <assert.h>
 #include <stdio.h>
 
@@ -16,16 +16,39 @@
 @end
 @interface TItem : NSObject
 @property id parts;
+@property NSData *bodyData;
 @end
 @implementation TItem
 - (id)_newChatItems { return self.parts; }
 @end
+static NSUInteger PlacementConstructionFailure;
 @interface TMessage : NSObject
 @property NSString *guid;
 @property TItem *item;
+@property NSAttributedString *body;
+@property NSArray *transfers;
+@property NSString *association;
+@property NSRange associationRange;
 @end
 @implementation TMessage
 - (id)_imMessageItem { return self.item; }
+- (instancetype)initWithSender:(id)sender time:(id)time text:(id)text messageSubject:(id)messageSubject
+             fileTransferGUIDs:(id)transfers flags:(unsigned long long)flags error:(id)error guid:(id)guid
+                       subject:(id)subject associatedMessageGUID:(id)association associatedMessageType:(long long)type
+        associatedMessageRange:(NSRange)range messageSummaryInfo:(id)summary {
+    assert(!sender && time && !messageSubject && [transfers count] == 1 && flags == 0x5ULL && !error && !subject);
+    assert(type == 1000 && range.length && [summary[@"eogcd"] isEqual:@3] && [summary[@"ust"] isEqual:@YES]);
+    assert([text isKindOfClass:NSAttributedString.class] && [[text string] isEqual:@"\ufffc"]);
+    assert(![text attribute:@"__kIMEmojiImageAttributeName" atIndex:0 effectiveRange:NULL]);
+    if (PlacementConstructionFailure == 1) return nil;
+    self = [super init];
+    if (self) {
+        self.guid = PlacementConstructionFailure == 2 ? @"wrong-construction-guid" : guid;
+        self.item = PlacementConstructionFailure == 3 ? nil : [TItem new];
+        self.body = text; self.transfers = transfers; self.association = association; self.associationRange = range;
+    }
+    return self;
+}
 @end
 @interface TChat : NSObject
 @property NSString *guid;
@@ -33,10 +56,16 @@
 @property bool containsTarget;
 @property NSUInteger sends;
 @property NSUInteger outcome;
+@property TMessage *sentPlacement;
 @end
 @implementation TChat
 - (bool)hasStoredMessageWithGUID:(id)guid { return self.containsTarget && [guid isEqual:@"target"]; }
 - (id)lastSentMessage { assert(0); return nil; }
+- (void)sendMessage:(TMessage *)message {
+    assert(message.item.bodyData.length); self.sends++; self.sentPlacement = message;
+    if (self.outcome == 2) [NSException raise:@"Synthetic" format:@"private placement details"];
+    if (self.outcome == 4) message.guid = @"changed-after-send";
+}
 @end
 @interface THistory : NSObject
 @property TMessage *message;
@@ -106,7 +135,8 @@
 - (id)transferForGUID:(id)guid { assert([guid isEqual:self.transfer.guid]); return self.transfer; }
 - (void)registerTransferWithDaemon:(id)guid {
     assert([guid isEqual:self.transfer.guid] && self.transfer.isSticker && self.transfer.stickerUserInfo.count);
-    assert(!self.transfer.attributionInfo && [self.transfer.stickerUserInfo[@"sir"] isEqual:@NO]);
+    if (self.transfer.stickerUserInfo[@"ssa"]) assert(self.transfer.attributionInfo.count);
+    else assert(!self.transfer.attributionInfo && [self.transfer.stickerUserInfo[@"sir"] isEqual:@NO]);
     self.registrations++;
     if (self.throws) [NSException raise:@"Synthetic" format:@"private transfer details"];
 }
@@ -160,6 +190,12 @@ static NSString *Send(TChat *chat, TPart *part, NSDictionary *request, BOOL remo
         TTapback.class, sender, TAssociated.class, TAcknowledgmentAggregate.class, TMessage.class, guid);
 }
 
+static NSString *Place(TChat *chat, TPart *part, NSDictionary *request, NSString *root,
+                       TCenter *center, NSString **guid) {
+    return BBHSendStickerPlacement(chat, part, part.messagePartRange, request, root, center,
+        TTransfer.class, TItem.class, TMessage.class, guid);
+}
+
 static TAssociated *Own(void) {
     TAssociated *item = [TAssociated new]; item.isFromMe = true; item.isReaction = true;
     item.associatedMessageType = 2007; item.associatedMessageGUID = @"p:0/target";
@@ -184,6 +220,8 @@ int main(void) {
         assert(BBHStickerTapbackABI(TTapback.class, TSender.class, TAssociated.class, TAcknowledgmentAggregate.class, TPart.class));
         assert(!BBHStickerTapbackABI(TTapback.class, TWrongSender.class, TAssociated.class, TAcknowledgmentAggregate.class, TPart.class));
         assert(!BBHStickerReactionsAvailable()); // Synthetic class names are never native capability evidence.
+        assert(!BBHStickerPlacementAvailable());
+        assert(BBHStickerPlacementABI(TChat.class, TAccount.class, TCenter.class, TTransfer.class, TItem.class, TMessage.class));
         assert(!BBHStickerTargetArguments(@"target", @YES));
         assert(!BBHStickerTargetArguments(@"target", @0.5));
         assert(!BBHStickerTargetArguments(@"target", @(-1)));
@@ -232,6 +270,26 @@ int main(void) {
         assert(fd >= 0 && write(fd, png.bytes, png.length) == (ssize_t)png.length && !close(fd));
         NSDictionary *add = @{@"chatGuid": @"chat", @"selectedMessageGuid": @"target", @"partIndex": @0, @"filePath": path};
         NSDictionary *remove = @{@"chatGuid": @"chat", @"selectedMessageGuid": @"target", @"partIndex": @0, @"reactionGuid": @"current-reaction"};
+        NSDictionary *geometry = @{@"x": @0.25, @"y": @0.75, @"scale": @0.5, @"rotation": @(M_PI_2), @"parentWidth": @200};
+        NSMutableDictionary *placement = [add mutableCopy]; placement[@"placement"] = geometry;
+        assert(BBHStickerPlacementRequestValid(placement));
+        for (NSString *key in geometry) {
+            NSMutableDictionary *bad = [geometry mutableCopy]; [bad removeObjectForKey:key];
+            assert(!BBHStickerPlacementValid(bad));
+            bad[key] = @YES; assert(!BBHStickerPlacementValid(bad));
+            bad[key] = @(NAN); assert(!BBHStickerPlacementValid(bad));
+            bad[key] = @(INFINITY); assert(!BBHStickerPlacementValid(bad));
+        }
+        NSArray *badGeometry = @[
+            @{@"x": @(-4.01)}, @{@"x": @4.01}, @{@"y": @(-4.01)}, @{@"y": @4.01},
+            @{@"scale": @0}, @{@"scale": @0.009}, @{@"scale": @4.01}, @{@"rotation": @(2 * M_PI + 0.01)},
+            @{@"parentWidth": @0}, @{@"parentWidth": @0.999}, @{@"parentWidth": @4097}, @{@"extra": @0}];
+        for (NSDictionary *delta in badGeometry) {
+            NSMutableDictionary *bad = [geometry mutableCopy]; [bad addEntriesFromDictionary:delta];
+            assert(!BBHStickerPlacementValid(bad));
+        }
+        NSMutableDictionary *outside = [geometry mutableCopy]; outside[@"x"] = @(-0.25); outside[@"y"] = @1.25;
+        assert(BBHStickerPlacementValid(outside));
         assert(BBHStickerTapbackRequestValid(add, NO) && BBHStickerTapbackRequestValid(remove, YES));
         NSMutableDictionary *invalid = [remove mutableCopy]; invalid[@"filePath"] = path;
         assert(!BBHStickerTapbackRequestValid(invalid, YES));
@@ -282,6 +340,44 @@ int main(void) {
                 assert([error containsString:@"unknown"] && !guid && chat.sends == 1 && !Snapshots(root).count);
             }
         } else assert(error && !guid && !chat.sends && !center.allocations && !Snapshots(root).count);
+        center = [TCenter new]; chat.sends = 0; chat.outcome = 0;
+        error = Place(chat, part, placement, root, center, &guid);
+        if (BBH_EXPERIMENTAL_STICKERS == 1) {
+            assert(!error && [guid isEqual:chat.sentPlacement.guid] && chat.sends == 1 && center.registrations == 1 && Snapshots(root).count == 1);
+            assert([chat.sentPlacement.association isEqual:@"p:0/target"] && NSEqualRanges(chat.sentPlacement.associationRange, part.messagePartRange));
+            NSDictionary *attrs = [chat.sentPlacement.body attributesAtIndex:0 effectiveRange:NULL];
+            assert([attrs[@"__kIMFileTransferGUIDAttributeName"] isEqual:center.transfer.guid]);
+            assert([attrs[@"__kIMMessagePartAttributeName"] isEqual:@0] && [attrs[@"__kIMBaseWritingDirectionAttributeName"] isEqual:@(-1)]);
+            NSDictionary *info = center.transfer.stickerUserInfo;
+            assert([info[@"sxs"] isEqual:@"0.25"] && [info[@"sys"] isEqual:@"0.75"]);
+            assert([info[@"ssa"] isEqual:@"0.5"] && [info[@"spw"] isEqual:@"200"]);
+            assert(fabs([info[@"sro"] doubleValue] - M_PI_2) < 0.00000001 && [info[@"sir"] isEqual:@NO]);
+            assert([info[@"spv"] isEqual:@0] && [info[@"sai"] isEqual:@"0"] && [info[@"sli"] isEqual:@"0"]);
+            assert([BBHStickerRead(center.transfer.localURL.path, root) isEqual:png]);
+            for (NSString *snapshot in Snapshots(root)) BBHStickerRemoveSnapshot(snapshot, root);
+            for (NSUInteger failure = 1; failure <= 3; failure++) {
+                PlacementConstructionFailure = failure; center = [TCenter new]; chat.sends = 0;
+                error = Place(chat, part, placement, root, center, &guid);
+                assert(error && !guid && !chat.sends && !center.registrations && !Snapshots(root).count);
+            }
+            PlacementConstructionFailure = 0; center = [TCenter new]; chat.containsTarget = false;
+            assert(Place(chat, part, placement, root, center, &guid) && !center.allocations && !chat.sends);
+            chat.containsTarget = true;
+            assert(BBHSendStickerPlacement(chat, part, NSMakeRange(7, 1), placement, root, center, TTransfer.class, TItem.class, TMessage.class, &guid));
+            assert(!center.allocations && !chat.sends);
+            chat.account.serviceName = @"SMS";
+            assert(Place(chat, part, placement, root, center, &guid) && !center.allocations);
+            chat.account.serviceName = @"iMessage"; center.throws = YES;
+            error = Place(chat, part, placement, root, center, &guid);
+            assert([error containsString:@"unknown"] && !guid && !chat.sends && center.registrations == 1 && Snapshots(root).count == 1);
+            for (NSString *snapshot in Snapshots(root)) BBHStickerRemoveSnapshot(snapshot, root);
+            for (NSNumber *outcome in @[@2, @4]) {
+                chat.outcome = outcome.unsignedIntegerValue; center = [TCenter new]; chat.sends = 0;
+                error = Place(chat, part, placement, root, center, &guid);
+                assert([error containsString:@"unknown"] && !guid && chat.sends == 1 && center.registrations == 1 && Snapshots(root).count == 1);
+                for (NSString *snapshot in Snapshots(root)) BBHStickerRemoveSnapshot(snapshot, root);
+            }
+        } else assert(error && !guid && !chat.sends && !center.allocations && !Snapshots(root).count);
         assert([BBHStickerRead(path, root) isEqual:png]);
         assert(!unlink(path.fileSystemRepresentation) && !rmdir(root.fileSystemRepresentation));
         Alias(TRegistry.class, "IMChatRegistry"); Alias(TChat.class, "IMChat"); Alias(TAccount.class, "IMAccount");
@@ -291,6 +387,7 @@ int main(void) {
         Alias(TSender.class, "IMTapbackSender"); Alias(TAssociated.class, "IMAssociatedMessageChatItem");
         Alias(TAcknowledgmentAggregate.class, "IMAggregateAcknowledgmentChatItem");
         assert(BBHStickerReactionsAvailable() == (BBH_EXPERIMENTAL_STICKERS == 1));
+        assert(BBHStickerPlacementAvailable() == (BBH_EXPERIMENTAL_STICKERS == 1));
         assert([BBHNativeStickerCapabilities()[@"stickerReactions"] boolValue] == (BBH_EXPERIMENTAL_STICKERS == 1));
         puts("Sticker tapback tests passed: gate, ABI, target ownership/range, timeout, exact result, stale/ambiguous removal, pre-registration cleanup, unknown outcomes.");
     }

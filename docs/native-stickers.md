@@ -1,6 +1,7 @@
-# Experimental standalone and row sticker sending
+# Experimental sticker sending
 
-This feature branch implements standalone stickers and one-message sticker rows in the
+This feature branch implements standalone stickers, one-message sticker rows,
+targeted placements, and sticker tapbacks in the
 released helper's existing transport. Production builds keep sticker sending
 disabled. The initial implementation used public reference source and synthetic
 tests, without accessing an installed helper, account, Messages database, or
@@ -49,7 +50,7 @@ acknowledges local native dispatch; the server must verify the row and attachmen
 and recipient delivery requires a controlled acceptance test.
 
 `ping.capabilities` adds `stickerSending`, `stickerPlacement`, and `stickerRows`.
-`stickerPlacement` remains false. `stickerSending` and
+`stickerSending` and
 `stickerRows` are true only
 when `BBH_EXPERIMENTAL_STICKERS=1` at compile time and every used private selector
 matches its full return and argument ABI. The guard covers the registry, chat,
@@ -106,6 +107,47 @@ The constructors and tapback transfer metadata adapt the Apache-2.0
 `third-party/imbridge-NOTICE` preserves its attribution and records this fork's
 changes; the repository's `LICENSE` contains Apache-2.0.
 
+## Targeted sticker placements
+
+`send-sticker-placement` accepts `chatGuid`, `selectedMessageGuid`, integer
+`partIndex`, `filePath`, optional `filename` and `stickerLabel`, and required
+`placement: {x, y, scale, rotation, parentWidth}`. Every geometry value must be a
+finite non-Boolean number. The application accepts x/y center fractions from
+`-4` to `4`, scale from `0.01` to `4`, rotation from `-2π` to `2π` radians, and
+parent preview width from `1` to `4096` points. These are implementation limits,
+not Apple's documented supported domain. Extra fields fail validation.
+
+The shared target lookup resolves the exact chat, message, and native part before
+asset preparation. The helper requires the part's current nonempty range to match
+the loaded range. It preserves the existing pinned imsg user-generated source and
+attribution metadata, rather than mixing in imbridge's different attribution
+schema. All five supplied geometry values replace the source's opaque geometry
+fields as locale-independent strings with 17 significant digits. Layout intents
+`sai`/`sli` use the observed string `"0"`; `spv` uses numeric `0`, and `sir` is false.
+The receiver must tolerate either numeric or numeric-string geometry/version
+values observed across native sources. Intrinsic scale sizing still needs native
+visual acceptance.
+
+The helper constructs one association-aware `IMMessage` with type `1000`, target
+`p:<part>/<guid>`, the native part range, summary `{eogcd: 3, ust: true}`, and flags
+`0x5`. Its body contains one U+FFFC, the exact transfer GUID, part `0`, writing
+direction `-1`, and no emoji-image attribute. It writes that body to the constructed
+message item's typedstream and requires the exact supplied construction GUID
+before registration. The standalone/row path uses flags `0x100005`; both flag
+sets follow the pinned native reference and require acceptance on the target OS.
+
+Success returns the exact constructed message GUID after one dispatch. Preparation
+failures clean only the new snapshot; registration or send failures keep it and
+report an unknown outcome with no retry. `stickerPlacement` requires the
+experimental flag and exact registry, target, transfer, message-item, chat-send,
+and association-aware constructor ABIs. The absent item association setters are
+not used. Each placement creates an independent message; this API does not edit
+or remotely remove an existing placement.
+
+The associated constructor adapts the Apache-2.0
+[imbridge 0009 patch](https://github.com/christianblandford/imbridge/blob/df8c9601b05f2fc2daef070a07f4f883cee350ba/helper/patches/0009-stickers.patch),
+with source attribution in `third-party/imbridge-NOTICE`.
+
 ## Asset and transfer handling
 
 The server must stage the source under the actual process user's
@@ -152,9 +194,9 @@ the MIT-licensed [openclaw/imsg revision
 specifically `AttachmentHandlers.inc`, `AttachmentTransfers.inc`,
 `StickerAssets.inc`, `MessageConstruction.inc`, and `IMCoreDeclarations.inc`.
 The copyright and license are preserved in `third-party/imsg-LICENSE`.
-The metadata describes the pinned user-generated sticker path; its geometry
-fields remain opaque. The helper never creates a target association or exposes
-a placement transform. This adaptation still requires native validation on the
+The metadata describes the pinned user-generated sticker path. Standalone and
+row sends keep its opaque geometry fields; placement sends replace them with
+validated caller values as described above. This adaptation requires native validation on the
 chosen OS and controlled standalone fixtures. Existing macOS 27 probes found
 sticker setters but did not establish delivery or metadata compatibility.
 
@@ -176,8 +218,9 @@ Neither placement body has `__kIMEmojiImageAttributeName`. Their sticker metadat
 uses strings for `sro`, `ssa`, `spw`, `sxs`, `sys`, `sai`, and `sli`, a Boolean for
 `sir`, and an integer for `spv`. Source keys include `pid`, `sid`, and `shash`.
 Those fixtures alone did not establish coordinate units or transform semantics.
-Placement sending and removal remain disabled in this slice; the later synthetic
-probe observations below describe the geometry evidence collected since then.
+Experimental placement construction is implemented; native removal is not.
+The later synthetic probe observations below describe the geometry evidence
+collected since the initial fixture inspection.
 [Apple's iPad guide](https://support.apple.com/guide/ipad/send-stickers-ipaddca01563/ipados)
 describes Sticker Details, swipe left, Delete as removing the sticker on that
 iPad only. This is a local deletion action, not evidence of remote unsend or a
@@ -187,6 +230,13 @@ and left one rotated sticker on the iPad, the sampled Mac placement rows and
 their self-received copies remained present, with unchanged attachment visibility
 and no retraction/update flags or new related removal event. This snapshot is
 consistent with iPad-local removal; it does not establish a remote deletion API.
+
+A later iPad picker action created another type-1000 association, this time with
+`sir=true`. Its separate outgoing and self-received rows remained after the user
+deleted one copy through Sticker Details. This snapshot shows no related removal
+event; it does not prove that every sticker deletion is local. Keep these
+independent sticker messages separate from the single-actor type-2007 tapback
+slot. Never remove a type-1000 sticker through the type-3007 endpoint.
 
 The observed row and standalone assets are HEIC; the placement assets are PNG.
 The helper still accepts only PNG/APNG/GIF/JPEG. HEIC support needs separate
@@ -237,6 +287,13 @@ radians. The transform scales by current parent width divided by parent preview
 width. The descriptor's own sticker scale does not change these two methods'
 output; intrinsic sticker sizing and orientation still need separate checks.
 This probe creates no message, chat, transfer, or view objects and never sends.
+
+The `tapback` mode constructs two `IMStickerTapback` descriptors with a synthetic,
+nonexistent transfer GUID after verifying the exact initializer and getter ABIs.
+On the same Mac, their native types were `2007` and `3007` for the false and true
+removal flags. It creates no sender, transfer, chat, account, or message. This
+confirms that those descriptor types exist alongside the observed type-1000
+picker stickers; it does not establish how recipients display either send path.
 
 Build and synthetic checks use the safe scripts, which never install or restart:
 

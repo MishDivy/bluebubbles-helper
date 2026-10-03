@@ -17,8 +17,11 @@ The helper also contains:
 
 imbridge is not affiliated with or endorsed by Apple Inc. iMessage and Messages are trademarks of Apple Inc.
 
-This fork adapts helper/patches/0010-sticker-tapbacks.patch from imbridge commit
+This fork adapts helper/patches/0009-stickers.patch and 0010-sticker-tapbacks.patch from imbridge commit
 df8c9601b05f2fc2daef070a07f4f883cee350ba. BBHStickerTapbacks.h changes the native
 path to guard exact ABIs, preserve ARC initializer ownership, validate targets
 before registration, use bounded private snapshots, reject stale removals, and
-return only the exact message supplied by IMTapbackSender.
+return only the exact message supplied by IMTapbackSender. BBHStickerPlacements.h
+uses the association-aware constructor with supplied, bounded geometry and the
+existing imsg user-generated source/attribution metadata, checks the native target
+range, and requires the exact constructed message GUID before registration.

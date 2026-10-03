@@ -33,3 +33,5 @@ xcrun clang -fobjc-arc -fblocks -Wall -Wextra -Werror -framework Foundation \
 xcrun clang -fobjc-arc -fblocks -Wall -Wextra -Werror -framework Foundation \
     -framework CoreGraphics -framework QuartzCore \
     "$root/tests/probe-sticker-geometry.m" -o "$test_dir/probe-build-check"
+xcrun clang -fobjc-arc -fblocks -Wall -Wextra -Werror -framework Foundation \
+    "$root/tests/probe-sticker-tapback.m" -o "$test_dir/probe-build-check"

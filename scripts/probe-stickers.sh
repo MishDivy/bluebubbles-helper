@@ -15,12 +15,13 @@ case "${1:-macos}" in
             -isystem "$support/usr/include" -iframework "$support/System/Library/Frameworks"
             -L"$support/usr/lib" -F"$support/System/Library/Frameworks")
         ;;
-    *) echo 'Usage: bash scripts/probe-stickers.sh [macos|maccatalyst] [metadata|geometry]' >&2; exit 2 ;;
+    *) echo 'Usage: bash scripts/probe-stickers.sh [macos|maccatalyst] [metadata|geometry|tapback]' >&2; exit 2 ;;
 esac
 case "${2:-metadata}" in
     metadata) source_file="$root/tests/probe-stickers.m" ;;
     geometry) source_file="$root/tests/probe-sticker-geometry.m" ;;
-    *) echo 'Probe must be metadata or geometry.' >&2; exit 2 ;;
+    tapback) source_file="$root/tests/probe-sticker-tapback.m" ;;
+    *) echo 'Probe must be metadata, geometry, or tapback.' >&2; exit 2 ;;
 esac
 probe_dir=$(mktemp -d "${TMPDIR:-/tmp}/bbh-stickers-probe.XXXXXXXX")
 trap 'rm -f "$probe_dir/probe"; rmdir "$probe_dir"' EXIT

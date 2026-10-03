@@ -284,7 +284,7 @@ static inline void BBHStickerApplyMetadata(id transfer, NSDictionary *info, NSDi
 
 // This metadata follows imsg's pinned user-generated sticker fixture. Geometry
 // stays opaque here; this module never creates a target association or transform.
-static inline void BBHStickerStamp(id transfer, NSData *data, NSDictionary *image, NSString *name, NSString *label) {
+static inline NSDictionary *BBHStickerStamp(id transfer, NSData *data, NSDictionary *image, NSString *name, NSString *label) {
     NSString *bundle = @"com.apple.messages.MSMessageExtensionBalloonPlugin:0000000000:com.apple.Stickers.UserGenerated.MessagesExtension";
     NSString *cleanLabel = [[label ?: @"Sticker" componentsSeparatedByCharactersInSet:NSCharacterSet.controlCharacterSet] componentsJoinedByString:@" "];
     if (!cleanLabel.length) cleanLabel = @"Sticker";
@@ -298,6 +298,7 @@ static inline void BBHStickerStamp(id transfer, NSData *data, NSDictionary *imag
         @"pgenszc": @{@"gm": @NO, @"iaig": @NO, @"mpw": @"600.000000", @"mth": @"100.000000",
                       @"mtw": @"100.000000", @"s": @"1.000000", @"st": @NO}};
     BBHStickerApplyMetadata(transfer, info, attribution);
+    return info;
 }
 
 // Returns an exact constructed IMMessage GUID after one dispatch. Any error
