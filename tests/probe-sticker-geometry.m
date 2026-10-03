@@ -65,6 +65,11 @@ int main(void) {
             {"wide-parent", {0, 0, 200, .5, .5, 1, 0}, {400, 100}},
             {"offset", {0, 0, 200, .25, .75, 1, 0}, {200, 100}},
         };
+        const struct { const char *name; StickerInsets values; } insetCases[] = {
+            {"top", {8, 0, 0, 0}},
+            {"horizontal", {0, 12, 0, 20}},
+            {"asymmetric", {8, 12, 16, 24}},
+        };
         @try {
             for (NSUInteger i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
                 CGRect parent = {{0, 0}, cases[i].parent};
@@ -86,6 +91,14 @@ int main(void) {
                     printf("reaction fromMe=%lu index=%lld location=(%.8f,%.8f) helperAlignLeft=%lu center=(%.8f,%.8f)\n",
                            (unsigned long)fromMe, index, location.x, location.y,
                            (unsigned long)fromMe, center.x, center.y);
+                    for (NSUInteger insetIndex = 0; insetIndex < sizeof(insetCases) / sizeof(insetCases[0]); ++insetIndex) {
+                        StickerInsets insets = insetCases[insetIndex].values;
+                        CGPoint insetLocation = ((CGPoint (*)(id, SEL, CGRect, long long, bool, StickerInsets))objc_msgSend)(
+                            cls, reactionSelector, parent, index, (bool)fromMe, insets);
+                        printf("reaction inset=%s values=(%.8f,%.8f,%.8f,%.8f) fromMe=%lu index=%lld location=(%.8f,%.8f)\n",
+                               insetCases[insetIndex].name, insets.top, insets.left, insets.bottom, insets.right,
+                               (unsigned long)fromMe, index, insetLocation.x, insetLocation.y);
+                    }
                 }
             }
             for (NSUInteger version = 0; version < 2; ++version) {

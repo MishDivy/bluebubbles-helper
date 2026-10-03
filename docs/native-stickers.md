@@ -288,14 +288,75 @@ width. The descriptor's own sticker scale does not change these two methods'
 output; intrinsic sticker sizing and orientation still need separate checks.
 This probe creates no message, chat, transfer, or view objects and never sends.
 
+The `sizing` mode inventories only size, scale, layout, image and geometry-related
+method names and type encodings declared on `IMSticker`, `CKSticker`,
+`CKStickerMediaObject`, `IMAssociatedStickerChatItem` and
+`CKAssociatedStickerChatItem`, plus their superclass names. It does not enumerate
+inherited methods. It creates no instances and invokes no private
+methods. Output is capped at 100 method rows, 128 lines and 32 KiB; a cap produces
+exit status 2 and an explicit incomplete marker. Missing classes are reported.
+Run `bash scripts/probe-stickers.sh maccatalyst sizing` only during a coordinated
+diagnostic. Compatibility CI compiles this mode without executing it.
+
+The sizing and expanded geometry modes compiled and ran in isolated diagnostics
+on macOS 27.0.1 (26A434, arm64), both with exit status 0. The runner removed each
+temporary executable and directory. `CKSticker` was absent. `IMSticker` exposed
+the class method `calculatePreviewScaleWithTargetSize:imageData:` with ABI
+`d40@0:8{CGSize=dd}16@32`, and its target-size instance method. The other scoped
+classes exposed preview shading, geometry refresh or size-that-fits methods.
+These signatures do not establish an intrinsic sizing formula.
+
+The separate `preview-scale` mode calls only that verified `IMSticker` class
+method after checking the exact ABI and arm64 architecture. It generates static
+PNG data in memory for four square/non-square source sizes, three small target
+sizes, and opaque versus half-transparent pixels: 24 fixed cases. Source
+dimensions are at most 320 per side and encoded PNG data at most 1 MiB. It prints
+only synthetic dimensions, alpha flags, target sizes and finite returned scales.
+It creates no sticker, transfer, message, account, chat or view instances and
+accesses no files or user artwork. CI compiles it without running it. Its native
+compile required an explicit bitmap-enum cast for clang's strict warnings and
+the same ChatKit framework load used by the sizing inventory. With those source
+corrections, the isolated macOS 27.0.1 run passed the exact ABI guard, then
+reported the fixed synthetic-calculation failure and exited 3. The protected
+block includes PNG generation and the class-method call, so its output does not
+identify the exact failing step.
+The matrix did not complete and produced no usable sizing results. Exception
+details were not printed; the runner cleaned its temporary files on every run.
+The console context may be insufficient, but the cause is not proven. This probe
+does not establish preview scale, intrinsic sticker size or a received-layout
+formula. Do not initialize UI objects or apps, or relax the guards to pursue this
+failure. Controlled device sizing acceptance remains required; no further native
+probes are planned for this diagnostic window.
+
 The expanded geometry probe also checks synthetic reaction-layout coordinates
-and native dictionary roundtrips. On the tested OS,
+for indices 0 through 5, both parent directions, zero insets and three nonzero
+inset tuples. These calls use the existing exact ABI guards. It also checks native
+dictionary roundtrips. On the tested OS,
 `IMSticker.geometryDescriptorFromUserInfoDictionary:` returned a parent width
 equal to the supplied layout intent, ignoring the supplied `spw`, for both
 numeric and string dictionaries. Other position/scale/rotation fields survived.
 This class-method observation does not establish how a real transcript item
 loads its geometry. Do not rewrite source metadata to reproduce it or claim
 pixel-accurate rendering from the class layout calculations alone.
+
+For the synthetic parent rectangle `(0,0,200,100)` and zero insets, the verified
+reaction-location method returned:
+
+| Index | Parent fromMe=false | Parent fromMe=true |
+| --- | --- | --- |
+| 0 | (152,76) | (0,76) |
+| 1 | (0,-24) | (152,-24) |
+| 2 | (176,52) | (-24,52) |
+| 3 | (-24,0) | (176,0) |
+| 4 | (152,52) | (0,52) |
+| 5 | (0,0) | (152,0) |
+
+Horizontal insets of 12 left and 20 right moved left-side x coordinates by +12
+and right-side coordinates by -20. Top inset 8 moved top-side y coordinates by
++8; bottom inset 16 moved bottom-side coordinates by -16. These are synthetic
+class-method results, not evidence of how received type-1000 `sir=true` stickers
+get their indices. Intrinsic sticker sizing and received-index assignment still
+require separate evidence.
 
 The `tapback` mode constructs two `IMStickerTapback` descriptors with a synthetic,
 nonexistent transfer GUID after verifying the exact initializer and getter ABIs.

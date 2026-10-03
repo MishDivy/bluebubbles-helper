@@ -15,16 +15,18 @@ case "${1:-macos}" in
             -isystem "$support/usr/include" -iframework "$support/System/Library/Frameworks"
             -L"$support/usr/lib" -F"$support/System/Library/Frameworks")
         ;;
-    *) echo 'Usage: bash scripts/probe-stickers.sh [macos|maccatalyst] [metadata|geometry|tapback]' >&2; exit 2 ;;
+    *) echo 'Usage: bash scripts/probe-stickers.sh [macos|maccatalyst] [metadata|sizing|preview-scale|geometry|tapback]' >&2; exit 2 ;;
 esac
 case "${2:-metadata}" in
     metadata) source_file="$root/tests/probe-stickers.m" ;;
+    sizing) source_file="$root/tests/probe-sticker-sizing.m" ;;
+    preview-scale) source_file="$root/tests/probe-sticker-preview-scale.m" ;;
     geometry) source_file="$root/tests/probe-sticker-geometry.m" ;;
     tapback) source_file="$root/tests/probe-sticker-tapback.m" ;;
-    *) echo 'Probe must be metadata, geometry, or tapback.' >&2; exit 2 ;;
+    *) echo 'Probe must be metadata, sizing, preview-scale, geometry, or tapback.' >&2; exit 2 ;;
 esac
 probe_dir=$(mktemp -d "${TMPDIR:-/tmp}/bbh-stickers-probe.XXXXXXXX")
 trap 'rm -f "$probe_dir/probe"; rmdir "$probe_dir"' EXIT
-xcrun clang "${flags[@]}" -framework Foundation -framework CoreGraphics -framework QuartzCore \
+xcrun clang "${flags[@]}" -framework Foundation -framework CoreGraphics -framework QuartzCore -framework ImageIO \
     "$source_file" -o "$probe_dir/probe"
 "$probe_dir/probe"
