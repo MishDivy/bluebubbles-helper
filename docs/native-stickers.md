@@ -49,7 +49,7 @@ acknowledges local native dispatch; the server must verify the row and attachmen
 and recipient delivery requires a controlled acceptance test.
 
 `ping.capabilities` adds `stickerSending`, `stickerPlacement`, and `stickerRows`.
-`stickerPlacement` and `stickerReactions` remain false. `stickerSending` and
+`stickerPlacement` remains false. `stickerSending` and
 `stickerRows` are true only
 when `BBH_EXPERIMENTAL_STICKERS=1` at compile time and every used private selector
 matches its full return and argument ABI. The guard covers the registry, chat,
@@ -58,6 +58,53 @@ The sticker Boolean setter supports C `bool` and signed `char` encodings using
 the corresponding function type; other scalar encodings fail. Runtime checks
 repeat on the actual chat, account, center, transfer, and constructed message.
 The unavailable `transferWithStickerFileURL:...` factory is not used.
+
+## Targeted sticker tapbacks
+
+`send-sticker-tapback` accepts `chatGuid`, `selectedMessageGuid`, required integer
+`partIndex`, `filePath`, and optional `filename` and `stickerLabel`. It adds or
+replaces the caller's sticker tapback using `IMStickerTapback` and `IMTapbackSender`.
+`remove-sticker-tapback` accepts only `chatGuid`, `selectedMessageGuid`, `partIndex`,
+and mandatory `reactionGuid`. Neither operation accepts a caller-supplied native
+transfer GUID. Both reject extra fields.
+
+Before reading an asset or registering a transfer, the helper checks that the
+native chat stores the requested message, loads that exact GUID, and resolves
+one matching native part with a nonempty, nonoverflowing range. Lookup settles
+once on the main queue and has a ten-second deadline. A late or repeated native
+callback cannot trigger preparation or sending. Multipart attachment aggregates
+use their verified native parts; the helper never falls back to another part.
+
+Removal reads only the selected part's current visible associated chat items.
+It unwraps only the known native acknowledgment aggregate, with a 256-item bound.
+One own live sticker reaction of type `2007` must match the requested target,
+part, and `reactionGuid`. The helper obtains its transfer GUID from the native
+tapback, constructs the native removed counterpart, and requires its type to be
+`3007`. It checks the current reaction again before dispatch. This stale-request
+guard is not a cross-process transaction; native replacement/removal behavior
+still needs controlled acceptance. Removal does not upload, snapshot, allocate,
+or register an attachment.
+
+Add/replace uses the same bounded ImageIO validation, no-follow staging reads,
+private snapshots, and transfer ABI checks as standalone sending. The tapback
+metadata follows the pinned imbridge tapback path, including its user-generated
+source identity and nil attribution. It does not claim to identify Bippy or any
+other sticker pack. Exported native constants identify `pid` as a sticker pack
+GUID, not a bundle-ID field. Metadata compatibility remains an acceptance gate.
+
+Both operations return only the GUID on the exact `IMMessage` returned by
+`IMTapbackSender.send`. A nil result, wrong class, missing GUID, or exception
+after registration/dispatch is an unknown outcome that must not trigger retry.
+The helper never reads `lastSentMessage`. The server must confirm native chat,
+authorship, association type/target/part, and sticker linkage against that GUID.
+`stickerReactions` requires the experimental flag and the exact target, transfer,
+tapback, sender, associated-item, and acknowledgment-aggregate ABIs. The capability
+describes available APIs, not successful delivery.
+
+The constructors and tapback transfer metadata adapt the Apache-2.0
+[imbridge 0010 patch](https://github.com/christianblandford/imbridge/blob/df8c9601b05f2fc2daef070a07f4f883cee350ba/helper/patches/0010-sticker-tapbacks.patch).
+`third-party/imbridge-NOTICE` preserves its attribution and records this fork's
+changes; the repository's `LICENSE` contains Apache-2.0.
 
 ## Asset and transfer handling
 
@@ -128,8 +175,9 @@ attachment, association type `1000`, and a part-0 reference to the same target.
 Neither placement body has `__kIMEmojiImageAttributeName`. Their sticker metadata
 uses strings for `sro`, `ssa`, `spw`, `sxs`, `sys`, `sai`, and `sli`, a Boolean for
 `sir`, and an integer for `spv`. Source keys include `pid`, `sid`, and `shash`.
-Coordinate units and transform semantics remain unverified. Placement sending
-and removal remain disabled.
+Those fixtures alone did not establish coordinate units or transform semantics.
+Placement sending and removal remain disabled in this slice; the later synthetic
+probe observations below describe the geometry evidence collected since then.
 [Apple's iPad guide](https://support.apple.com/guide/ipad/send-stickers-ipaddca01563/ipados)
 describes Sticker Details, swipe left, Delete as removing the sticker on that
 iPad only. This is a local deletion action, not evidence of remote unsend or a
@@ -161,6 +209,14 @@ from `sticker_user_info` and attribution. Never select, decode, or print
 transport metadata out of committed documentation and fixtures. The account
 above records structure and field types only.
 
+A later scoped observation found both position-version-0 numeric strings and
+position-version-1 numeric values. Receive code must accept both finite forms;
+the earlier observation does not define every version's field types. Exported
+IMSharedUtilities constants identify `sli`/`sai` as layout intents, `spw` as parent
+preview width, `sxs`/`sys` as position scalars, `ssa` as scale, and `sro` as
+rotation. `pid` is a pack GUID; `sbid` is a bundle ID. These names came from the
+installed framework's static constants, not private attachment transport data.
+
 ## Validation and acceptance
 
 On 2026-10-03, an isolated Mac Catalyst class-metadata probe on macOS 27.0.1
@@ -172,6 +228,15 @@ observations, not proof of delivery. `scripts/probe-stickers.sh maccatalyst`
 reproduces the metadata inventory without constructing private-framework objects,
 reading accounts or messages, injecting code, or sending anything. Its temporary
 executable is removed on exit. CI compiles the probe but does not run it.
+
+The separate `geometry` probe mode uses synthetic inputs with two native class
+layout methods. It checks their full arm64 ABIs and the geometry struct's named
+field types before calling them. With layout intents 0, position scalars identify
+the sticker center as a fraction of the parent rectangle and rotation is in
+radians. The transform scales by current parent width divided by parent preview
+width. The descriptor's own sticker scale does not change these two methods'
+output; intrinsic sticker sizing and orientation still need separate checks.
+This probe creates no message, chat, transfer, or view objects and never sends.
 
 Build and synthetic checks use the safe scripts, which never install or restart:
 

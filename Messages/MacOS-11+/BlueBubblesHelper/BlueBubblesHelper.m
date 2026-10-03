@@ -26,7 +26,7 @@
 #import "Logging.h"
 #import "BBHCompatibility.h"
 #import "BBHReactions.h"
-#import "BBHStickers.h"
+#import "BBHStickerTapbacks.h"
 #import "IMHandleRegistrar.h"
 #import "IMCore.h"
 #import "IMChatHistoryController.h"
@@ -350,6 +350,38 @@ NSMutableArray* vettedAliases;
                 if (row) response[@"attachmentGuids"] = attachmentGUIDs;
             }
             [[NetworkController sharedInstance] sendMessage:response];
+        }
+    } else if ([event isEqualToString:@"send-sticker-tapback"] || [event isEqualToString:@"remove-sticker-tapback"]) {
+        BOOL remove = [event isEqualToString:@"remove-sticker-tapback"];
+        void (^respond)(NSString *, NSString *) = ^(NSString *error, NSString *guid) {
+            if (!transaction) return;
+            NSDictionary *response = error ? @{@"transactionId": transaction, @"error": error}
+                : @{@"transactionId": transaction, @"identifier": guid};
+            [[NetworkController sharedInstance] sendMessage:response];
+        };
+        @try {
+            if (!BBHStickerTapbackRequestValid(data, remove)) respond(@"Invalid sticker reaction request", nil);
+            else if (!BBHStickerReactionsAvailable()) respond(@"Native sticker reactions are unavailable", nil);
+            else {
+                id chat = [[IMChatRegistry sharedInstance] existingChatWithGUID:data[@"chatGuid"]];
+                id history = BBHStickerObject(NSClassFromString(@"IMChatHistoryController"), @"sharedInstance");
+                id center = [IMFileTransferCenter sharedInstance];
+                NSString *root = BBHStickerRoot();
+                BBHLoadStickerTarget(chat, data[@"selectedMessageGuid"], [data[@"partIndex"] integerValue], history,
+                    NSClassFromString(@"IMAggregateAttachmentMessagePartChatItem"), 10000, ^(id part, NSRange range, NSString *error) {
+                        (void)range;
+                        if (error) { respond(error, nil); return; }
+                        NSString *guid = nil;
+                        NSString *sendError = BBHSendStickerTapback(chat, part, data, remove, root,
+                            center, NSClassFromString(@"IMFileTransfer"),
+                            NSClassFromString(@"IMStickerTapback"), NSClassFromString(@"IMTapbackSender"),
+                            NSClassFromString(@"IMAssociatedMessageChatItem"), NSClassFromString(@"IMAggregateAcknowledgmentChatItem"),
+                            NSClassFromString(@"IMMessage"), &guid);
+                        respond(sendError, guid);
+                    });
+            }
+        } @catch (NSException *exception) {
+            (void)exception; respond(@"Native sticker reaction preparation failed", nil);
         }
     // If the server tells us to edit a message
     } else if ([event isEqualToString:@"edit-message"]) {

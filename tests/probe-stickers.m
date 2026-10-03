@@ -48,14 +48,33 @@ int main(void) {
         }
         const char *classes[] = {"IMStickerTapback", "IMTapbackSender", "IMStickerUserInfo",
             "IMSticker", "CKSticker", "CKStickerInfo", "CKStickerMediaObject",
-            "CKStickerMessagePartChatItem", "IMStickerMessagePartChatItem"};
+            "CKStickerMessagePartChatItem", "IMStickerMessagePartChatItem", "IMTapback",
+            "IMMessagePartChatItem", "IMAssociatedStickerChatItem", "CKAssociatedStickerChatItem",
+            "CKStickerReactionLayoutHelper", "IMAssociatedMessageChatItem", "IMAssociatedMessageAcknowledgmentChatItem",
+            "IMTapbackChatItem", "CKTapbackChatItem", "IMStickerGeometryDescriptor",
+            "IMAggregateAcknowledgmentChatItem", "IMMessageAcknowledgmentChatItem",
+            "CKAssociatedMessageChatItem", "CKBrowserDraggedSticker", "CKStickerTranscriptInsertionHandler"};
         for (NSUInteger i = 0; i < sizeof(classes) / sizeof(classes[0]); ++i) {
             Class cls = objc_getClass(classes[i]);
             printf("Class %s: %s\n", classes[i], cls ? "present" : "absent");
+            if (cls) printf("Superclass %s: %s\n", classes[i], class_getName(class_getSuperclass(cls)));
             unsigned int count = 0;
             Method *list = class_copyMethodList(cls, &count);
             for (unsigned int j = 0; j < count; ++j) {
                 printf("%s -%s ABI=%s\n", classes[i], sel_getName(method_getName(list[j])),
+                       method_getTypeEncoding(list[j]));
+            }
+            free(list);
+            Ivar *ivars = class_copyIvarList(cls, &count);
+            for (unsigned int j = 0; j < count; ++j) {
+                if (strstr(ivar_getName(ivars[j]), "eometry")) {
+                    printf("%s ivar %s ABI=%s\n", classes[i], ivar_getName(ivars[j]), ivar_getTypeEncoding(ivars[j]));
+                }
+            }
+            free(ivars);
+            list = class_copyMethodList(object_getClass(cls), &count);
+            for (unsigned int j = 0; j < count; ++j) {
+                printf("%s +%s ABI=%s\n", classes[i], sel_getName(method_getName(list[j])),
                        method_getTypeEncoding(list[j]));
             }
             free(list);
@@ -78,9 +97,22 @@ int main(void) {
         for (unsigned int i = 0; i < classCount; ++i) {
             const char *name = class_getName(classList[i]);
             if ((strncmp(name, "IM", 2) == 0 || strncmp(name, "CK", 2) == 0)
-                && strstr(name, "Sticker")) printf("Sticker class: %s\n", name);
+                && (strstr(name, "Sticker") || strstr(name, "Geometry") || strstr(name, "Tapback")
+                    || strstr(name, "Acknowledgment"))) printf("Sticker class: %s\n", name);
         }
         free(classList);
+        const char *keys[] = {"IMStickerUserInfoLayoutIntentKey", "IMStickerUserInfoAssociatedLayoutIntentKey",
+            "IMStickerUserInfoParentPreviewWidthKey", "IMStickerUserInfoXScalarKey", "IMStickerUserInfoYScalarKey",
+            "IMStickerUserInfoScaleKey", "IMStickerUserInfoRotationKey", "IMStickerUserInfoTranscodedScaleKey",
+            "IMStickerUserInfoStickerPositionVersionKey", "IMStickerUserInfoStickerEffectTypeKey",
+            "IMStickerUserInfoStickerIsReactionKey", "IMStickerUserInfoStickerGUIDKey",
+            "IMStickerUserInfoStickerPackGUIDKey", "IMStickerUserInfoStickerBundleIDKey"};
+        for (NSUInteger i = 0; i < sizeof(keys) / sizeof(keys[0]); ++i) {
+            id __unsafe_unretained *value = (id __unsafe_unretained *)dlsym(RTLD_DEFAULT, keys[i]);
+            if (value && [*value isKindOfClass:NSString.class]) {
+                printf("Static key %s=%s\n", keys[i], [(NSString *)*value UTF8String]);
+            }
+        }
         puts("Metadata inventory complete. No instances created or messages accessed.");
         return 0;
     }

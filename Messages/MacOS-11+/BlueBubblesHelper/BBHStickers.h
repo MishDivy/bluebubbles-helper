@@ -263,6 +263,25 @@ static inline id BBHStickerObject(id object, NSString *name) {
     return ((id (*)(id, SEL))objc_msgSend)(object, NSSelectorFromString(name));
 }
 
+static inline id BBHStickerPrepareTransfer(id center, Class transferClass, NSString *snapshot) {
+    NSURL *url = [NSURL fileURLWithPath:snapshot];
+    id guid = ((id (*)(id, SEL, id))objc_msgSend)(center, NSSelectorFromString(@"guidForNewOutgoingTransferWithLocalURL:"), url);
+    id transfer = BBHStickerString(guid, 1024)
+        ? ((id (*)(id, SEL, id))objc_msgSend)(center, NSSelectorFromString(@"transferForGUID:"), guid) : nil;
+    return transfer && [transfer isKindOfClass:transferClass] && BBHStickerTransferABI([transfer class])
+        && [BBHStickerObject(transfer, @"guid") isEqual:guid]
+        && [BBHStickerObject(transfer, @"localURL") isEqual:url] ? transfer : nil;
+}
+
+static inline void BBHStickerApplyMetadata(id transfer, NSDictionary *info, NSDictionary *attribution) {
+    SEL sticker = NSSelectorFromString(@"setIsSticker:");
+    if (BBHStickerMethod([transfer class], @"setIsSticker:", NO, "v", @[@(@encode(bool))]))
+        ((void (*)(id, SEL, bool))objc_msgSend)(transfer, sticker, true);
+    else ((void (*)(id, SEL, char))objc_msgSend)(transfer, sticker, 1);
+    ((void (*)(id, SEL, id))objc_msgSend)(transfer, NSSelectorFromString(@"setStickerUserInfo:"), info);
+    ((void (*)(id, SEL, id))objc_msgSend)(transfer, NSSelectorFromString(@"setAttributionInfo:"), attribution);
+}
+
 // This metadata follows imsg's pinned user-generated sticker fixture. Geometry
 // stays opaque here; this module never creates a target association or transform.
 static inline void BBHStickerStamp(id transfer, NSData *data, NSDictionary *image, NSString *name, NSString *label) {
@@ -278,12 +297,7 @@ static inline void BBHStickerStamp(id transfer, NSData *data, NSDictionary *imag
         @"pgensh": image[@"height"], @"pgensw": image[@"width"],
         @"pgenszc": @{@"gm": @NO, @"iaig": @NO, @"mpw": @"600.000000", @"mth": @"100.000000",
                       @"mtw": @"100.000000", @"s": @"1.000000", @"st": @NO}};
-    SEL sticker = NSSelectorFromString(@"setIsSticker:");
-    if (BBHStickerMethod([transfer class], @"setIsSticker:", NO, "v", @[@(@encode(bool))]))
-        ((void (*)(id, SEL, bool))objc_msgSend)(transfer, sticker, true);
-    else ((void (*)(id, SEL, char))objc_msgSend)(transfer, sticker, 1);
-    ((void (*)(id, SEL, id))objc_msgSend)(transfer, NSSelectorFromString(@"setStickerUserInfo:"), info);
-    ((void (*)(id, SEL, id))objc_msgSend)(transfer, NSSelectorFromString(@"setAttributionInfo:"), attribution);
+    BBHStickerApplyMetadata(transfer, info, attribution);
 }
 
 // Returns an exact constructed IMMessage GUID after one dispatch. Any error
@@ -323,14 +337,10 @@ static inline NSString *BBHSendStickerSet(id chat, NSString *chatGUID, NSArray<N
         NSMutableArray<NSString *> *transferGUIDs = [NSMutableArray new];
         NSMutableAttributedString *body = [[NSMutableAttributedString alloc] initWithString:@""];
         for (NSUInteger index = 0; index < requests.count; index++) {
-            NSString *snapshot = snapshots[index]; NSURL *url = [NSURL fileURLWithPath:snapshot];
-            id transferGUID = ((id (*)(id, SEL, id))objc_msgSend)(center, NSSelectorFromString(@"guidForNewOutgoingTransferWithLocalURL:"), url);
-            id transfer = BBHStickerString(transferGUID, 1024)
-                ? ((id (*)(id, SEL, id))objc_msgSend)(center, NSSelectorFromString(@"transferForGUID:"), transferGUID) : nil;
-            if (!transfer || ![transfer isKindOfClass:transferClass] || !BBHStickerTransferABI([transfer class])
-                || [transferGUIDs containsObject:transferGUID]
-                || ![BBHStickerObject(transfer, @"guid") isEqual:transferGUID]
-                || ![BBHStickerObject(transfer, @"localURL") isEqual:url]) return @"Unable to prepare native sticker transfer";
+            NSString *snapshot = snapshots[index];
+            id transfer = BBHStickerPrepareTransfer(center, transferClass, snapshot);
+            id transferGUID = transfer ? BBHStickerObject(transfer, @"guid") : nil;
+            if (!transfer || [transferGUIDs containsObject:transferGUID]) return @"Unable to prepare native sticker transfer";
             NSDictionary *request = requests[index];
             NSString *filename = request[@"filename"] ?: [@"sticker." stringByAppendingString:images[index][@"extension"]];
             BBHStickerStamp(transfer, assets[index], images[index], snapshot.lastPathComponent, request[@"stickerLabel"]);
