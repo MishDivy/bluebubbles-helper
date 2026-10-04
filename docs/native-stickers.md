@@ -94,6 +94,31 @@ or send messages. Construction and serialization evidence do not establish
 recipient delivery or sticker rendering; controlled self-chat acceptance remains
 required. The unrelated placement path is unchanged.
 
+### Read-only staged asset diagnostic
+
+`bash scripts/probe-sticker-asset.sh "$explicit_staged_path"` reads exactly one
+operator-selected attempted upload. Select it separately by the known attempt
+time and file metadata; the probe does not discover files or choose a recent one.
+It derives the actual account's staging root with `BBHStickerRoot` and accepts
+only a safe basename directly inside one UUID staging directory under that root.
+It uses the helper's exact `BBHStickerDirectory`, `BBHStickerRead`, and
+`BBHStickerImage` functions. Output contains only stage booleans and, after full
+validation, the allowlisted format, dimensions, and frame count. It never prints
+paths, filenames, content, hashes, native exception details, or message data.
+
+The diagnostic links public frameworks only and performs no transfer preparation,
+registration, chat lookup, or send. Its runner creates and removes only its own
+temporary executable directory; it does not alter the selected asset. Compatibility
+checks compile this probe without executing it or reading any staged files.
+
+For the explicitly selected self-chat attempt on 2026-10-04, the isolated asset
+probe exited `0`: root, staging path, directory, bounded read, and image validation
+all passed. ImageIO identified a 512 by 512 PNG with one frame. The operator
+confirmed cleanup of the isolated source and executable. This run used the SSH
+execution context; it does not establish that Messages has the same sandbox or
+entitlement access. Transfer preparation, construction in the installed helper,
+registration, and sending remain unproven for that attempt.
+
 ## Targeted sticker tapbacks
 
 `send-sticker-tapback` accepts `chatGuid`, `selectedMessageGuid`, required integer

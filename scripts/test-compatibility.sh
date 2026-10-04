@@ -41,5 +41,9 @@ xcrun clang -fobjc-arc -fblocks -Wall -Wextra -Werror -framework Foundation \
     "$root/tests/probe-sticker-tapback.m" -o "$test_dir/probe-build-check"
 xcrun clang -fobjc-arc -fblocks -Wall -Wextra -Werror -framework Foundation \
     "$root/tests/probe-sticker-construction.m" -o "$test_dir/probe-build-check"
+xcrun clang -fobjc-arc -fblocks -Wall -Wextra -Werror \
+    -framework Foundation -framework ImageIO -framework CoreGraphics \
+    -I"$root/Messages/MacOS-11+/BlueBubblesHelper" \
+    "$root/tests/probe-sticker-asset.m" -o "$test_dir/probe-build-check"
 xcrun clang -fobjc-arc -Wall -Wextra -Werror -framework Foundation -framework ImageIO \
     "$root/tests/probe-sticker-container.m" -o "$test_dir/probe-build-check"
