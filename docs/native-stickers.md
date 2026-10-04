@@ -219,6 +219,27 @@ rejects empty files, oversized files, FIFOs, symlinks, traversal, and changed
 size/modification time. An ancestor symlink also fails, including a symlinked
 Messages or staging directory.
 
+Directory traversal uses search-only descriptors when the SDK defines `O_SEARCH`
+and the runtime is macOS 13 or later. The [published Ventura XNU header](https://github.com/apple-oss-distributions/xnu/blob/xnu-8792.41.9/bsd/sys/fcntl.h)
+defines this mode separately from data reads; the published Big Sur and Monterey
+headers do not. macOS 11/12 and older SDK builds retain the existing read-only
+directory walk. This conservative availability gate does not retry a denied
+search-only open with different flags. Every component still uses no-follow
+descriptors and the same metadata checks; leaf reads still require read permission
+and pass all ownership, size, link-count and stability checks.
+
+A read-only policy check of the live Messages process on 2026-10-04 allowed
+metadata access along the attempted staging path and data access to Messages'
+attachment staging directories and the selected file, but denied data reads on
+three higher-level ancestors. This explains why a traversal that opens each
+ancestor for reading can fail even when direct access to the staged file is
+allowed. The isolated regression in `tests/sticker-sandbox.m` applies a profile
+only to its disposable child and synthetic fixtures. It checks that a legacy
+ancestor read fails while bounded leaf reads and snapshot creation/read/removal
+work, and checks the existing symlink, ownership and writable-path restrictions.
+It does not query or change Messages, account state, or sandbox policy for another
+process. Live helper acceptance remains separate from this regression.
+
 ImageIO identifies PNG/APNG, GIF, or JPEG from the bytes. The helper requires
 a complete container, 1 to 100 frames, dimensions from 1 to 618 for each frame,
 at most 500 KiB, and at most 25 million aggregate decoded pixels. Each frame is

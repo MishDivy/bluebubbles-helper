@@ -147,12 +147,18 @@ static inline BOOL BBHStickerAbsolutePath(NSString *path) {
 static inline int BBHStickerDirectory(NSString *directory, NSString *root) {
     if (!BBHStickerAbsolutePath(directory) || !BBHStickerAbsolutePath(root)
         || !([directory isEqual:root] || [directory hasPrefix:[root stringByAppendingString:@"/"]])) return -1;
-    int fd = open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    int flags = O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC;
+#ifdef O_SEARCH
+    // Search-only directory descriptors are supported by macOS 13 and later.
+    if (@available(macOS 13.0, *)) flags = O_SEARCH | O_NOFOLLOW | O_CLOEXEC;
+#endif
+    int fd = open("/", flags);
+    if (fd < 0) return -1;
     NSString *walked = @"";
     for (NSString *component in directory.pathComponents) {
         if ([component isEqual:@"/"]) continue;
         if ([component isEqual:@"."] || [component isEqual:@".."] || !component.length) { close(fd); return -1; }
-        int next = openat(fd, component.fileSystemRepresentation, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+        int next = openat(fd, component.fileSystemRepresentation, flags);
         close(fd); if (next < 0) return -1;
         fd = next;
         walked = [walked stringByAppendingFormat:@"/%@", component];
