@@ -316,6 +316,13 @@ check this row schema and construction, but the corrected row still needs actual
 Apple rendering acceptance. Placement transforms and reaction sizing probes do
 not establish inline row sizing.
 
+The row-only candidate later produced the same Apple rendering failure. Scoped
+inspection confirmed its source-only dictionaries persisted on both outgoing and
+self-received attachments, without geometry or preview dimensions. Removing those
+fields alone was not sufficient. The implementation remains unchanged while
+constructor classification, transfer preview lifecycle and asset formats are
+investigated; successful standalone delivery does not establish row compatibility.
+
 Two placements on one text message are independent rows, each with its own
 attachment, association type `1000`, and a part-0 reference to the same target.
 Neither placement body has `__kIMEmojiImageAttributeName`. Their sticker metadata
@@ -382,6 +389,57 @@ observations, not proof of delivery. `scripts/probe-stickers.sh maccatalyst`
 reproduces the metadata inventory without constructing private-framework objects,
 reading accounts or messages, injecting code, or sending anything. Its temporary
 executable is removed on exit. CI compiles the probe but does not run it.
+
+The diagnostic `row-lifecycle` mode inventories class metadata for transfer preview
+generation state/version and emoji-image identifier/description getters and setters,
+exact flags and inline/sticker/preview classification selectors. It checks a fixed
+list of selectors on `IMFileTransfer`, `IMFileTransferCenter`, `IMMessage` and
+`IMMessageItem`, reporting their signatures or absences,
+and known sticker/aggregate-part class and superclass names. It creates no
+instances, reads no files or messages, and invokes no private methods or setters.
+Output is capped at 128 total lines and 32 KiB; incomplete output exits
+with status 2. The existing runner cleans its temporary executable. Compatibility
+CI compiles the mode without executing it. Use
+`bash scripts/probe-stickers.sh maccatalyst row-lifecycle` only for a reviewed diagnostic;
+method availability does not establish preview-state values or their semantics.
+
+The first isolated run compiled in both targets. The native macOS executable
+could not load the required framework and exited 1. The Mac Catalyst run found
+signed-64-bit preview-generation state/version getters and setters, but no
+emoji-image identifier/description getters or setters on `IMFileTransfer`. It
+also found `IMMessage` inline-attachment getters. Broad discovery runs exited 2
+and were incomplete. The final fixed-list probe completed with exit 0, without
+enumerating unrelated methods. These signatures do not prove that
+setting preview state to 1 prepares a preview or supplies missing glyph metadata.
+
+The separate native-macOS `glyph` mode reads one image from stdin, bounded to
+5 MiB, 618 pixels per dimension, 100 frames and 25 million decoded pixels. It
+uses only public ImageIO and AppKit data APIs. Output contains fixed Boolean
+results for decoding, glyph creation, identifier/description presence and
+input/content byte equality; it never prints the values or artwork. The runner
+disables core dumps and removes its temporary executable. CI compiles only.
+`bash scripts/probe-stickers.sh macos glyph --synthetic` generates a square PNG in memory
+for an isolated unsupported-input diagnostic. AppKit requires glyph input to
+conform to its content type; successful initialization of a PNG is not a validity
+guarantee or a supported conversion route. Exceptions produce a fixed failure
+Boolean and exit 3 without details. Any selected real fixture must reach stdin
+through a separately reviewed, bounded no-follow reader; this probe opens no
+fixture paths and reads no databases. It changes no encoded assets or transfers.
+For private fixtures, capture and discard framework stderr and accept only the
+fixed Boolean stdout fields; framework diagnostics are outside this probe's
+exception handler.
+
+On macOS 27.0.1, the square synthetic PNG decoded as an image but produced no
+adaptive image glyph. Empty, malformed and oversized inputs failed with bounded,
+fixed diagnostics. The selected native iPad-row HEIC decoded as a glyph with
+nonempty identifier and description, preserving its encoded bytes. Both PNGs in
+the failed custom row decoded as images but produced no glyph. The images stayed
+in memory on the Mac and were not changed or exported. This distinguishes their
+representations; it does not prove the rendering cause or provide an encoder.
+Apple's [imageContent documentation](https://developer.apple.com/documentation/appkit/nsadaptiveimageglyph/imagecontent)
+describes glyph identifiers, descriptions and metadata as part of the encoded
+data. Neither a plain HEIC transcode nor setting a preview-ready flag establishes
+equivalent glyph data or preservation of animation.
 
 The separate `geometry` probe mode uses synthetic inputs with two native class
 layout methods. It checks their full arm64 ABIs and the geometry struct's named

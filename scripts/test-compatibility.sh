@@ -36,6 +36,10 @@ xcrun clang -fobjc-arc -fblocks -Wall -Wextra -Werror -framework Foundation \
 xcrun clang -fobjc-arc -fblocks -Wall -Wextra -Werror -framework Foundation \
     "$root/tests/probe-stickers.m" -o "$test_dir/probe-build-check"
 xcrun clang -fobjc-arc -Wall -Wextra -Werror -framework Foundation \
+    "$root/tests/probe-sticker-row-lifecycle.m" -o "$test_dir/probe-build-check"
+xcrun clang -fobjc-arc -Wall -Wextra -Werror -framework AppKit -framework CoreGraphics -framework ImageIO \
+    "$root/tests/probe-sticker-glyph.m" -o "$test_dir/probe-build-check"
+xcrun clang -fobjc-arc -Wall -Wextra -Werror -framework Foundation \
     "$root/tests/probe-sticker-sizing.m" -o "$test_dir/probe-build-check"
 xcrun clang -fobjc-arc -Wall -Wextra -Werror -framework Foundation -framework CoreGraphics -framework ImageIO \
     "$root/tests/probe-sticker-preview-scale.m" -o "$test_dir/probe-build-check"
