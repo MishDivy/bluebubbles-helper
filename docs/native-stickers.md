@@ -26,6 +26,10 @@ It constructs one attributed body with one U+FFFC per sticker, distinct transfer
 GUIDs in request order, and part index `0`, numeric writing direction `-1`, and
 emoji-image attribute `1` on every character. One message initializer receives
 the ordered transfer GUIDs, and one native send dispatches the row.
+Row bodies omit the filename attribute. Their transfers carry source identity
+and accessibility attribution, without placement geometry or preview sizing.
+Optional filenames remain validated request fields; ordered attachment GUIDs,
+not filenames or database row order, establish the row's order.
 
 Success retains the existing helper response shape:
 
@@ -274,8 +278,8 @@ the MIT-licensed [openclaw/imsg revision
 specifically `AttachmentHandlers.inc`, `AttachmentTransfers.inc`,
 `StickerAssets.inc`, `MessageConstruction.inc`, and `IMCoreDeclarations.inc`.
 The copyright and license are preserved in `third-party/imsg-LICENSE`.
-The metadata describes the pinned user-generated sticker path. Standalone and
-row sends keep its opaque geometry fields; placement sends replace them with
+The metadata describes the pinned user-generated sticker path. Standalone
+sends keep its opaque geometry fields; placement sends replace them with
 validated caller values as described above. This adaptation requires native validation on the
 chosen OS and controlled standalone fixtures. Existing macOS 27 probes found
 sticker setters but did not establish delivery or metadata compatibility.
@@ -291,6 +295,26 @@ A standalone Bippy sticker has the same body attributes. This evidence supports
 the standalone emoji-image attribute and the row body with all attachments
 in part 0. Row sending uses the experimental gate; production defaults keep it
 disabled, and native row delivery still requires acceptance.
+
+A later controlled Android-to-Apple row test failed rendering acceptance: Samsung
+displayed all stickers horizontally, while Apple clients showed vertical or
+overlapping stickers, or only the first sticker. Scoped read-only comparison
+found that the sent and self-received row bodies retained the same U+FFFC count,
+ordered transfer mapping and numeric attributes as the native iPad reference.
+The reference had exactly four attributes per character, with no filename.
+Its sticker metadata had only string `pid`, `sid` and `shash`; attribution had
+`bundle-id`, `accessl`, `name` and `adam-id`. It had no placement geometry or
+`pgensw`, `pgensh` or `pgenszc` sizing metadata. Our rows had added those fields,
+and Apple rewrote sizing on the first attachment only. That observation does
+not establish why the native preview path treated the first attachment differently.
+
+The row-only correction omits filename attributes and the injected geometry and
+preview sizing. It retains the existing user-generated source identity and
+accessibility attribution; it does not copy the reference's sticker-pack identity
+or invent an App Store ID. Standalone sends remain unchanged. Synthetic tests
+check this row schema and construction, but the corrected row still needs actual
+Apple rendering acceptance. Placement transforms and reaction sizing probes do
+not establish inline row sizing.
 
 Two placements on one text message are independent rows, each with its own
 attachment, association type `1000`, and a part-0 reference to the same target.

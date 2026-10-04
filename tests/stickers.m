@@ -286,6 +286,17 @@ static NSString *SendRow(StickerChat *chat, NSDictionary *request, NSString *roo
     return error;
 }
 
+static void AssertRowTransfer(StickerTransfer *transfer, NSData *data, NSString *label) {
+    assert(transfer.isSticker && transfer.stickerUserInfo.count == 3 && transfer.attributionInfo.count == 3);
+    NSString *bundle = @"com.apple.messages.MSMessageExtensionBalloonPlugin:0000000000:com.apple.Stickers.UserGenerated.MessagesExtension";
+    assert([transfer.stickerUserInfo[@"pid"] isEqual:bundle]);
+    assert([transfer.stickerUserInfo[@"sid"] isEqual:transfer.localURL.lastPathComponent]);
+    assert([transfer.stickerUserInfo[@"shash"] isEqual:BBHStickerDigest(data, YES)]);
+    assert([transfer.attributionInfo[@"bundle-id"] isEqual:bundle]);
+    assert([transfer.attributionInfo[@"name"] isEqual:@"Stickers"]);
+    assert([transfer.attributionInfo[@"accessl"] isEqual:label]);
+}
+
 int main(void) {
     @autoreleasepool {
         assert(BBHStickerNativeABI(StickerChat.class, StickerAccount.class, StickerCenter.class,
@@ -379,6 +390,12 @@ int main(void) {
             assert([BBHStickerRead(center.transfer.localURL.path, root) isEqual:png]);
             assert([center.transfer.stickerUserInfo[@"shash"] isEqual:BBHStickerDigest(png, YES)]);
             assert([center.transfer.attributionInfo[@"accessl"] isEqual:request[@"stickerLabel"]]);
+            assert([center.transfer.stickerUserInfo[@"spw"] isEqual:@"163.73095703"]);
+            assert([center.transfer.stickerUserInfo[@"sxs"] isEqual:@"0.50000000"]);
+            assert([center.transfer.stickerUserInfo[@"sys"] isEqual:@"0.50000000"]);
+            assert([center.transfer.attributionInfo[@"pgensw"] isEqual:BBHStickerImage(png)[@"width"]]);
+            assert([center.transfer.attributionInfo[@"pgensh"] isEqual:BBHStickerImage(png)[@"height"]]);
+            assert([center.transfer.attributionInfo[@"pgenszc"][@"s"] isEqual:@"1.000000"]);
             assert([[chat.message.item.body attribute:@"__kIMFilenameAttributeName" atIndex:0 effectiveRange:NULL] isEqual:request[@"filename"]]);
             assert([[chat.message.item.body attribute:@"__kIMEmojiImageAttributeName" atIndex:0 effectiveRange:NULL] isEqual:@1]);
             assert([[chat.message.item.body attribute:@"__kIMBaseWritingDirectionAttributeName" atIndex:0 effectiveRange:NULL] isEqual:@(-1)]);
@@ -422,10 +439,12 @@ int main(void) {
                 NSAttributedString *body = chat.message.item.body;
                 assert([[body attribute:@"__kIMFileTransferGUIDAttributeName" atIndex:index effectiveRange:NULL]
                     isEqual:chat.message.item.transfers[index]]);
-                assert([[body attribute:@"__kIMFilenameAttributeName" atIndex:index effectiveRange:NULL] isEqual:rowItems[index][@"filename"]]);
+                assert([body attributesAtIndex:index effectiveRange:NULL].count == 4);
+                assert(![body attribute:@"__kIMFilenameAttributeName" atIndex:index effectiveRange:NULL]);
                 assert([[body attribute:@"__kIMMessagePartAttributeName" atIndex:index effectiveRange:NULL] isEqual:@0]);
                 assert([[body attribute:@"__kIMEmojiImageAttributeName" atIndex:index effectiveRange:NULL] isEqual:@1]);
                 assert([[body attribute:@"__kIMBaseWritingDirectionAttributeName" atIndex:index effectiveRange:NULL] isEqual:@(-1)]);
+                AssertRowTransfer(center.transfers[index], png, rowItems[index][@"stickerLabel"]);
             }
             for (NSString *snapshot in Snapshots(root)) BBHStickerRemoveSnapshot(snapshot, root);
             for (directConstructionMode = 1; directConstructionMode <= 15; directConstructionMode++) {
@@ -471,11 +490,13 @@ int main(void) {
                 NSAttributedString *body = chat.message.item.body;
                 assert([[body attribute:@"__kIMFileTransferGUIDAttributeName" atIndex:index effectiveRange:NULL]
                     isEqual:chat.message.item.transfers[index]]);
-                assert([[body attribute:@"__kIMFilenameAttributeName" atIndex:index effectiveRange:NULL] isEqual:rowItems[index][@"filename"]]);
+                assert([body attributesAtIndex:index effectiveRange:NULL].count == 4);
+                assert(![body attribute:@"__kIMFilenameAttributeName" atIndex:index effectiveRange:NULL]);
                 assert([[body attribute:@"__kIMMessagePartAttributeName" atIndex:index effectiveRange:NULL] isEqual:@0]);
                 assert([[body attribute:@"__kIMEmojiImageAttributeName" atIndex:index effectiveRange:NULL] isEqual:@1]);
                 assert([[body attribute:@"__kIMBaseWritingDirectionAttributeName" atIndex:index effectiveRange:NULL] isEqual:@(-1)]);
                 assert([BBHStickerRead(center.transfers[index].localURL.path, root) isEqual:png]);
+                AssertRowTransfer(center.transfers[index], png, rowItems[index][@"stickerLabel"]);
             }
             for (NSString *snapshot in Snapshots(root)) BBHStickerRemoveSnapshot(snapshot, root);
             for (NSUInteger index = 1; index <= 3; index++) {

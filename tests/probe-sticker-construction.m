@@ -33,9 +33,11 @@ static BOOL requiredBody(id value, NSAttributedString *body) {
     if (![value isKindOfClass:NSAttributedString.class] || ![[value string] isEqual:body.string]) return NO;
     for (NSUInteger index = 0; index < body.length; index++) {
         for (NSString *key in @[@"__kIMFileTransferGUIDAttributeName", @"__kIMFilenameAttributeName",
-            @"__kIMMessagePartAttributeName", @"__kIMEmojiImageAttributeName", @"__kIMBaseWritingDirectionAttributeName"])
-            if (![[value attribute:key atIndex:index effectiveRange:NULL]
-                isEqual:[body attribute:key atIndex:index effectiveRange:NULL]]) return NO;
+            @"__kIMMessagePartAttributeName", @"__kIMEmojiImageAttributeName", @"__kIMBaseWritingDirectionAttributeName"]) {
+            id actual = [value attribute:key atIndex:index effectiveRange:NULL];
+            id expected = [body attribute:key atIndex:index effectiveRange:NULL];
+            if (actual != expected && ![actual isEqual:expected]) return NO;
+        }
     }
     return YES;
 }
@@ -76,10 +78,12 @@ int main(void) {
                 for (NSUInteger index = 0; index < count; index++) {
                     NSString *transfer = [NSString stringWithFormat:@"synthetic-nonexistent-transfer-%lu", (unsigned long)index];
                     [transfers addObject:transfer];
-                    [body appendAttributedString:[[NSAttributedString alloc] initWithString:@"\ufffc" attributes:@{
-                        @"__kIMFileTransferGUIDAttributeName": transfer, @"__kIMFilenameAttributeName": @"synthetic.png",
+                    NSMutableDictionary *attributes = [@{
+                        @"__kIMFileTransferGUIDAttributeName": transfer,
                         @"__kIMMessagePartAttributeName": @0, @"__kIMEmojiImageAttributeName": @1,
-                        @"__kIMBaseWritingDirectionAttributeName": @(-1)}]];
+                        @"__kIMBaseWritingDirectionAttributeName": @(-1)} mutableCopy];
+                    if (count == 1) attributes[@"__kIMFilenameAttributeName"] = @"synthetic.png";
+                    [body appendAttributedString:[[NSAttributedString alloc] initWithString:@"\ufffc" attributes:attributes]];
                 }
                 NSString *guid = NSUUID.UUID.UUIDString;
                 phase = "constructor invocation";

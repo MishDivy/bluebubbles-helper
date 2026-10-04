@@ -325,6 +325,16 @@ static inline NSDictionary *BBHStickerStamp(id transfer, NSData *data, NSDiction
     return info;
 }
 
+// Native inline rows carry source attribution, without placement or preview sizing.
+static inline void BBHStickerRowStamp(id transfer, NSData *data, NSString *name, NSString *label) {
+    NSString *bundle = @"com.apple.messages.MSMessageExtensionBalloonPlugin:0000000000:com.apple.Stickers.UserGenerated.MessagesExtension";
+    NSString *cleanLabel = [[label ?: @"Sticker" componentsSeparatedByCharactersInSet:NSCharacterSet.controlCharacterSet] componentsJoinedByString:@" "];
+    if (!cleanLabel.length) cleanLabel = @"Sticker";
+    BBHStickerApplyMetadata(transfer,
+        @{@"pid": bundle, @"sid": name, @"shash": BBHStickerDigest(data, YES)},
+        @{@"accessl": cleanLabel, @"bundle-id": bundle, @"name": @"Stickers"});
+}
+
 static inline id BBHStickerConstructMessage(Class itemClass, Class messageClass, NSAttributedString *body,
                                             NSArray *transfers, NSString *expectedGUID) {
     id message;
@@ -405,12 +415,15 @@ static inline NSString *BBHSendStickerSet(id chat, NSString *chatGUID, NSArray<N
             if (!transfer || [transferGUIDs containsObject:transferGUID]) return @"Unable to prepare native sticker transfer";
             NSDictionary *request = requests[index];
             NSString *filename = request[@"filename"] ?: [@"sticker." stringByAppendingString:images[index][@"extension"]];
-            BBHStickerStamp(transfer, assets[index], images[index], snapshot.lastPathComponent, request[@"stickerLabel"]);
+            if (requests.count > 1)
+                BBHStickerRowStamp(transfer, assets[index], snapshot.lastPathComponent, request[@"stickerLabel"]);
+            else BBHStickerStamp(transfer, assets[index], images[index], snapshot.lastPathComponent, request[@"stickerLabel"]);
             [transferGUIDs addObject:transferGUID];
-            [body appendAttributedString:[[NSAttributedString alloc] initWithString:@"\ufffc" attributes:@{
+            NSMutableDictionary *attributes = [@{
                 @"__kIMBaseWritingDirectionAttributeName": @(-1), @"__kIMFileTransferGUIDAttributeName": transferGUID,
-                @"__kIMFilenameAttributeName": filename, @"__kIMMessagePartAttributeName": @0,
-                @"__kIMEmojiImageAttributeName": @1}]];
+                @"__kIMMessagePartAttributeName": @0, @"__kIMEmojiImageAttributeName": @1} mutableCopy];
+            if (requests.count == 1) attributes[@"__kIMFilenameAttributeName"] = filename;
+            [body appendAttributedString:[[NSAttributedString alloc] initWithString:@"\ufffc" attributes:attributes]];
         }
         NSString *expectedGUID = NSUUID.UUID.UUIDString;
         id message = BBHStickerConstructMessage(itemClass, messageClass, [body copy], [transferGUIDs copy], expectedGUID);
