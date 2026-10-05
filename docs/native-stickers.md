@@ -65,9 +65,18 @@ initializer ABI, it constructs an `IMMessage` from immutable attributed text and
 ordered transfer GUIDs, then checks its generated item's body and bounded,
 nonempty serialized body data. Both paths require the constructed message's GUID
 to equal the construction GUID before registering or sending. The helper reads
-the same message object after dispatch. It never consults `lastSentMessage`. This response
+the same message object after dispatch. If `sendMessage:` returns normally,
+the helper returns that object's current valid UUID string, even if IMChat
+assigned a different GUID during dispatch. It never consults `lastSentMessage`. This response
 acknowledges local native dispatch; the server must verify the row and attachment,
 and recipient delivery requires a controlled acceptance test.
+
+Fixed errors distinguish a registration exception, send exception, unavailable
+post-send UUID, and post-send identifier lookup exception. None returns identifiers
+or permits retry. The server also recognizes the earlier generic unknown-dispatch
+error. Synthetic tests cover a changed valid UUID, malformed/nil/non-string/empty
+identifiers and each exception stage, with at most one dispatch and unchanged
+ordered transfer GUIDs.
 
 `ping.capabilities` adds `stickerSending`, `stickerPlacement`, and `stickerRows`.
 `stickerSending` and
@@ -150,6 +159,18 @@ This probe did not resolve chats or accounts, create or register file transfers,
 or send messages. Construction and serialization evidence do not establish
 recipient delivery or sticker rendering; controlled self-chat acceptance remains
 required. The unrelated placement path is unchanged.
+
+The generated constructor probe also checks the exact `hasInlineAttachments`
+and `inlineAttachmentAttributesArray` getter ABIs before invocation, including
+the actual returned message class. It reports a Boolean classification, nil/array
+shape, at most 10 entries and known body-attribute key counts. Dictionary entries
+are bounded to 16 keys; unknown key names and values are never printed. The probe
+uses only nonexistent synthetic transfer identifiers. Its getter results do not
+establish asset preparation or recipient rendering.
+On macOS 27.0.1, all three synthetic bodies reported inline attachments, with
+attribute-array counts 1, 2 and 2 and all four known keys present. Those results
+show body classification without prepared assets; they do not explain why only
+the first uploaded row attachment completes native preview preparation.
 
 ### Read-only staged asset diagnostic
 
@@ -513,7 +534,8 @@ The APNG uses distinct frames and checks their order, alpha, delays of 0.1 and
 preservation of this generated animation data, not animated glyph rendering.
 It copies no code, image, identifier, description or provenance metadata from the
 reference. It reads no stdin or fixtures and writes no files. Output bytes are
-bounded to 5 MiB; unavailable encoding returns exit 2, and exceptions use a fixed
+bounded to 500 KiB by the current diagnostic's data consumer; unavailable
+encoding or metadata creation returns exit 2, and exceptions use a fixed
 failure marker. Run `bash scripts/probe-stickers.sh macos glyph-encoding` only for
 a reviewed diagnostic. CI compiles it without executing it. This experiment does
 not provide a production encoder, establish Messages delivery, or establish
@@ -529,6 +551,35 @@ PNG and own-ID APNG produced glyphs with their own identifier and unchanged
 encoded bytes. The APNG retained both distinct frames in order, full decoded
 pixels and alpha, delays and loop count. These results cover tiny generated
 samples; they do not establish how Messages renders animated glyphs.
+
+The next generated-only matrix has nine cases: own-ID PNG and HEIC, each with
+and without an own generic description, for a 512-by-512 square and a
+384-by-256 non-square image, plus a 32-by-32 two-frame APNG baseline. Generated
+pixels include transparent and opaque regions, alpha gradients and sharp color
+edges. The description uses Apple's documented
+[TIFF image-description property](https://developer.apple.com/documentation/imageio/kcgimagepropertytiffimagedescription)
+through [ImageIO's metadata property mapping](https://developer.apple.com/documentation/imageio/cgimagemetadatasetvaluematchingimageproperty(_:_:_:_:)).
+Whether the glyph returns that own description is an observation, not an assumed
+mapping. Output contains only fixed case names, Booleans and scalar measurements;
+it never prints the generated identifier or description.
+
+Each case checks frame count, dimensions, orientation 1 and exact decoded alpha.
+PNG/APNG must retain exact canonical RGBA pixels; HEIC reports maximum and mean
+absolute RGB-channel error without selecting a permitted lossy threshold. The
+error uses 8-bit premultiplied RGBA in the same DeviceRGB context for both images.
+Apple's [compression-quality documentation](https://developer.apple.com/documentation/imageio/kcgimagedestinationlossycompressionquality)
+says quality 1 requests lossless compression only when the format supports it.
+The diagnostic changes no production encoding policy.
+
+On macOS 27.0.1, the nine-case matrix ran with PNG and APNG retaining exact
+RGBA/alpha. The four HEIC cases retained bounds, dimensions, orientation, own
+glyph identity and descriptions when requested, but failed exact alpha and
+returned exit 3. Maximum RGB error was 2 for the square and 3 for the non-square,
+with mean errors about 0.333 and 0.334 in 8-bit premultiplied channels. The next
+diagnostic measured maximum alpha error 1 in both HEIC sizes, with mean errors
+0.001953125 and 0.015625. Fully transparent and fully opaque pixels remained exact.
+PNG/APNG had zero alpha error. These measurements do not weaken exact-alpha
+rejection or permit a lossy production encoder.
 
 Two controlled static mixed-message HEIC attachments each had one frame, with
 glyph identifier and description present and no timing/loop metadata. A

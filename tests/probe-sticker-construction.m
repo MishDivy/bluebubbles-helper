@@ -29,6 +29,33 @@ static void record(const char *name, BOOL value) {
     printf("%s=%s\n", name, value ? "true" : "false");
 }
 
+static BOOL inlineStructure(id message) {
+    if (!matches([message class], "hasInlineAttachments", "B16@0:8")
+        || !matches([message class], "inlineAttachmentAttributesArray", "@16@0:8")) return NO;
+    record("has_inline_attachments", ((BOOL (*)(id, SEL))objc_msgSend)(message, sel_registerName("hasInlineAttachments")));
+    id attributes = object(message, "inlineAttachmentAttributesArray");
+    record("inline_attributes_nil", attributes == nil);
+    record("inline_attributes_is_array", [attributes isKindOfClass:NSArray.class]);
+    if (attributes && ![attributes isKindOfClass:NSArray.class]) return NO;
+    NSUInteger count = [attributes count];
+    if (count > 10) return NO;
+    printf("inline_attributes_count=%lu\n", (unsigned long)count);
+    NSUInteger dictionaryCount = 0, transferCount = 0, partCount = 0, emojiCount = 0, writingCount = 0;
+    for (id entry in attributes) {
+        if (![entry isKindOfClass:NSDictionary.class]) continue;
+        if ([entry count] > 16) return NO;
+        dictionaryCount++;
+        transferCount += entry[@"__kIMFileTransferGUIDAttributeName"] != nil;
+        partCount += entry[@"__kIMMessagePartAttributeName"] != nil;
+        emojiCount += entry[@"__kIMEmojiImageAttributeName"] != nil;
+        writingCount += entry[@"__kIMBaseWritingDirectionAttributeName"] != nil;
+    }
+    record("inline_entries_all_dictionaries", dictionaryCount == count);
+    printf("inline_transfer_key_count=%lu\ninline_part_key_count=%lu\ninline_emoji_key_count=%lu\ninline_writing_key_count=%lu\n",
+        (unsigned long)transferCount, (unsigned long)partCount, (unsigned long)emojiCount, (unsigned long)writingCount);
+    return YES;
+}
+
 static BOOL requiredBody(id value, NSAttributedString *body) {
     if (![value isKindOfClass:NSAttributedString.class] || ![[value string] isEqual:body.string]) return NO;
     for (NSUInteger index = 0; index < body.length; index++) {
@@ -64,6 +91,8 @@ int main(void) {
             || !matches(messageClass, "text", "@16@0:8")
             || !matches(messageClass, "fileTransferGUIDs", "@16@0:8")
             || !matches(messageClass, "flags", "Q16@0:8")
+            || !matches(messageClass, "hasInlineAttachments", "B16@0:8")
+            || !matches(messageClass, "inlineAttachmentAttributesArray", "@16@0:8")
             || !matches(messageClass, "_imMessageItem", "@16@0:8")
             || !matches(itemClass, "body", "@16@0:8")
             || !matches(itemClass, "bodyData", "@16@0:8")) {
@@ -103,6 +132,8 @@ int main(void) {
                 if (![object(message, "fileTransferGUIDs") isEqual:transfers]) return failed("ordered message transfers");
                 if (((unsigned long long (*)(id, SEL))objc_msgSend)(message, sel_registerName("flags")) != 0x100005ULL)
                     return failed("message flags");
+                phase = "synthetic inline classification getters";
+                if (!inlineStructure(message)) return failed("bounded inline classification structure");
                 phase = "message item getter";
                 id item = object(message, "_imMessageItem");
                 if (![item isKindOfClass:itemClass]) return failed("item class");
@@ -136,7 +167,7 @@ int main(void) {
         } @catch (NSException *exception) {
             (void)exception; return failed(phase);
         }
-        puts("Synthetic standalone, row and composition construction passed. No chat, account, or transfer was queried or registered; no send occurred.");
+        puts("Synthetic standalone, row and composition construction passed. No chat or account was resolved; no transfer was created or registered; no send occurred.");
         return 0;
     }
 }
