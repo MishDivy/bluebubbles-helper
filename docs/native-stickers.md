@@ -17,10 +17,12 @@ The filename is a basename of at most 255 UTF-16 units; the label is at most 150
 The helper checks the resolved native chat's GUID and account service name. Only
 `iMessage` passes; a client-supplied GUID prefix cannot establish the service.
 
-The separate `send-sticker-row` event accepts only `chatGuid` and `stickers`, an
+The separate `send-sticker-row` event accepts `chatGuid` and `stickers`, an
 ordered array of 2 to 10 objects containing `filePath` and optional `filename`
-and `stickerLabel`. Each file uses the same validation limits as a standalone
-sticker; their combined size cannot exceed 5 MiB. The helper validates every
+and `stickerLabel`. Inline rows require static PNG source images; animated input,
+GIF and JPEG fail before transfer creation. The original files remain intact.
+Source and prepared files each retain the 500 KiB per-file limit; their combined
+size cannot exceed 5 MiB. The helper validates every
 source and prepares every snapshot and marked transfer before any registration.
 It constructs one attributed body with one U+FFFC per sticker, distinct transfer
 GUIDs in request order, and part index `0`, numeric writing direction `-1`, and
@@ -30,6 +32,17 @@ Row bodies omit the filename attribute. Their transfers carry source identity
 and accessibility attribution, without placement geometry or preview sizing.
 Optional filenames remain validated request fields; ordered attachment GUIDs,
 not filenames or database row order, establish the row's order.
+
+An optional `text` field supports a complete ordered composition body: at most
+4096 UTF-16 units, well-formed surrogate pairs, and exactly one reserved U+FFFC
+per ordered sticker. With text present, 1 to 10 stickers are valid. Text remains
+verbatim, including whitespace, newlines and U+0000. The body has part 0 and
+writing direction -1 throughout; only placeholders receive transfer GUIDs and
+emoji-image 1. Other fields and caller-supplied part indexes remain invalid.
+`stickerComposition` uses the same experimental compile flag and exact native/
+glyph ABI guard as rows. Network dispatch explicitly refuses text requests if
+that capability is false. This advertises the reviewed candidate path, not proven
+Apple rendering acceptance. Production builds keep it false.
 
 Success retains the existing helper response shape:
 
@@ -68,6 +81,46 @@ The sticker Boolean setter supports C `bool` and signed `char` encodings using
 the corresponding function type; other scalar encodings fail. Runtime checks
 repeat on the actual chat, account, center, transfer, and constructed message.
 The unavailable `transferWithStickerFileURL:...` factory is not used.
+Rows additionally require the public `NSAdaptiveImageGlyph` data initializer and
+identity/content getter ABIs; an absent class or mismatched selector fails closed.
+Class lookup uses the frameworks already loaded in the process and introduces no
+UIKit link or UI initialization.
+
+## Static inline image preparation
+
+`BBHStickerGlyphPreparation.h` creates a derived static PNG in memory with a fresh
+own `tiff:DocumentName` identifier. Public ImageIO `AddImageAndMetadata` performs
+the encoding; a bounded data consumer stops output at 500 KiB. Before decoding,
+the helper bounds declared dimensions. It then requires complete source/output
+decoding, unchanged dimensions and orientation, matching alpha presence and exact
+canonical RGBA pixels. It neither crops nor pads, stretches or resizes an image.
+The public glyph must have the helper's identifier and return the exact prepared
+bytes; checks repeat on its actual class. It copies no native sticker identity or
+provenance. An acTL/fcTL/fdAT chunk or APNG timing/loop metadata rejects inline
+input even when ImageIO reports only one frame.
+
+Every row source is validated before any derivation, and every derived image
+passes these checks before any snapshot or transfer creation. The row retains
+5 MiB and 25 million aggregate decoded-pixel bounds. A five-second monotonic
+preparation deadline is checked between stages; it cannot interrupt a single
+in-process ImageIO call. The existing exclusive private snapshot path receives
+the prepared bytes and rechecks them. Standalone, placement and tapback sends keep
+their original-byte paths, including supported animation. Preparation has no
+codec fallback and sets no preview-ready flags. Apple row rendering still needs
+controlled acceptance after the reviewed build.
+
+On macOS 27.0.1, the full compatibility suite passed with the public preparation
+test executed, not skipped. Its 64 generated cases covered square/non-square
+images, a 618-by-1 image, opaque and partial-alpha content, and all eight
+orientations. Synthetic tests also covered denied glyph ABIs, malformed and
+oversized headers, deadline/output bounds, nth-asset failure before registration,
+verbatim mixed-body marker mapping, and unchanged standalone animation. These
+tests used no accounts or real messages and performed no native send.
+The native Mac Catalyst synthetic constructor also passed for standalone, row
+and mixed text, including exact attributed body and decoded archive semantics
+across fresh item getters. Compile-only default and experimental helper builds
+passed signature verification for arm64 and arm64e. Controlled row/composition
+rendering remains pending.
 
 ## Direct construction compatibility evidence
 
@@ -249,8 +302,10 @@ a complete container, 1 to 100 frames, dimensions from 1 to 618 for each frame,
 at most 500 KiB, and at most 25 million aggregate decoded pixels. Each frame is
 decoded and checked for complete status before native preparation. The helper
 writes the validated bytes to a new private exclusive snapshot in the same
-staging directory and rechecks those bytes. It preserves source bytes, alpha,
-and animation; it does not resize, convert, or re-encode an image.
+staging directory and rechecks those bytes. Standalone, placement and tapback
+paths preserve source bytes, alpha and animation without re-encoding. Static
+inline rows use the separately verified derived PNG path described above; their
+caller-owned source files remain unchanged.
 
 The transfer initially points at that snapshot in the Messages Attachments tree.
 Its native GUID and local URL must match. The helper sets `isSticker`,
@@ -319,9 +374,10 @@ not establish inline row sizing.
 The row-only candidate later produced the same Apple rendering failure. Scoped
 inspection confirmed its source-only dictionaries persisted on both outgoing and
 self-received attachments, without geometry or preview dimensions. Removing those
-fields alone was not sufficient. The implementation remains unchanged while
-constructor classification, transfer preview lifecycle and asset formats are
-investigated; successful standalone delivery does not establish row compatibility.
+fields alone was not sufficient. Later generated-data probes established an
+own-identifier PNG encoding route, now implemented only for static inline rows
+and the gated composition path. Successful standalone delivery and generated
+glyph creation do not establish Apple row rendering compatibility.
 
 Two placements on one text message are independent rows, each with its own
 attachment, association type `1000`, and a part-0 reference to the same target.
@@ -416,7 +472,11 @@ The separate native-macOS `glyph` mode reads one image from stdin, bounded to
 5 MiB, 618 pixels per dimension, 100 frames and 25 million decoded pixels. It
 uses only public ImageIO and AppKit data APIs. Output contains fixed Boolean
 results for decoding, glyph creation, identifier/description presence and
-input/content byte equality; it never prints the values or artwork. The runner
+input/content byte equality. After bounded decoding, it also reports a fixed
+format enum (`png`, `heic`, `heics`, `jpeg`, `gif`), frame count, first-frame width
+and height, and known timing/loop metadata presence Booleans. Those presence
+checks do not establish animation or timing validity. It never prints metadata
+values, identifiers, descriptions or artwork. The runner
 disables core dumps and removes its temporary executable. CI compiles only.
 `bash scripts/probe-stickers.sh macos glyph --synthetic` generates a square PNG in memory
 for an isolated unsupported-input diagnostic. AppKit requires glyph input to
@@ -426,7 +486,7 @@ Boolean and exit 3 without details. Any selected real fixture must reach stdin
 through a separately reviewed, bounded no-follow reader; this probe opens no
 fixture paths and reads no databases. It changes no encoded assets or transfers.
 For private fixtures, capture and discard framework stderr and accept only the
-fixed Boolean stdout fields; framework diagnostics are outside this probe's
+allowlisted stdout fields; framework diagnostics are outside this probe's
 exception handler.
 
 On macOS 27.0.1, the square synthetic PNG decoded as an image but produced no
@@ -440,6 +500,44 @@ Apple's [imageContent documentation](https://developer.apple.com/documentation/a
 describes glyph identifiers, descriptions and metadata as part of the encoded
 data. Neither a plain HEIC transcode nor setting a preview-ready flag establishes
 equivalent glyph data or preservation of animation.
+
+The generated-only `glyph-encoding` diagnostic tests a static encoding hypothesis
+reported in [noppe's first-person experiment](https://zenn.dev/noppe/scraps/e08ce9a5a2c355).
+Its original implementation creates a small synthetic image with transparent and
+half-alpha regions, then uses public ImageIO APIs to encode PNG, plain HEIC and
+HEIC with a fresh synthetic `tiff:DocumentName`. Two further controls encode PNG
+and two-frame APNG with that own identifier. It compares decoded dimensions,
+alpha and pixels, and reports glyph identity/content checks as fixed Booleans.
+The APNG uses distinct frames and checks their order, alpha, delays of 0.1 and
+0.25 seconds, and loop count 2 after ImageIO decoding. Passing those checks proves
+preservation of this generated animation data, not animated glyph rendering.
+It copies no code, image, identifier, description or provenance metadata from the
+reference. It reads no stdin or fixtures and writes no files. Output bytes are
+bounded to 5 MiB; unavailable encoding returns exit 2, and exceptions use a fixed
+failure marker. Run `bash scripts/probe-stickers.sh macos glyph-encoding` only for
+a reviewed diagnostic. CI compiles it without executing it. This experiment does
+not provide a production encoder, establish Messages delivery, or establish
+animated glyph support, effects or arbitrary adaptive sizing. Maximum HEIC quality does not imply
+lossless colors; the pixel-equality result remains separate from alpha preservation.
+
+On macOS 27.0.1, the initial three-case static probe passed: PNG and plain HEIC
+produced no glyph, while HEIC with its own identifier produced a glyph with the
+same identifier and unchanged encoded bytes. All three tiny samples retained
+their dimensions, alpha and full decoded pixels. The generated glyph had no
+description. The expanded five-case probe also passed on macOS 27.0.1: own-ID
+PNG and own-ID APNG produced glyphs with their own identifier and unchanged
+encoded bytes. The APNG retained both distinct frames in order, full decoded
+pixels and alpha, delays and loop count. These results cover tiny generated
+samples; they do not establish how Messages renders animated glyphs.
+
+Two controlled static mixed-message HEIC attachments each had one frame, with
+glyph identifier and description present and no timing/loop metadata. A
+controlled animated reference was a 12-frame APNG with timing and loop metadata
+but no glyph. Its single message had two native parts: the attachment placeholder
+had part 0 and writing direction -1 without the emoji-image attribute; the text
+had part 1 and writing direction -1. The static references used part 0 throughout,
+with emoji-image 1 on the sticker only. The animated representation therefore
+needs a separate multipart body policy; glyph creation alone cannot choose it.
 
 The separate `geometry` probe mode uses synthetic inputs with two native class
 layout methods. It checks their full arm64 ABIs and the geometry struct's named

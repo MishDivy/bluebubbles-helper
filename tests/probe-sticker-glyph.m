@@ -30,6 +30,44 @@ static BOOL decodable(NSData *data) {
     CFRelease(source); return valid;
 }
 
+static BOOL summary(NSData *data) {
+    CGImageSourceRef source = CGImageSourceCreateWithData((__bridge CFDataRef)data, NULL);
+    if (!source) return NO;
+    NSString *type = (__bridge NSString *)CGImageSourceGetType(source);
+    NSArray *types = @[@"public.png", @"public.heic", @"public.heics", @"public.jpeg", @"com.compuserve.gif"];
+    const char *names[] = {"png", "heic", "heics", "jpeg", "gif"};
+    NSUInteger format = [types indexOfObject:type];
+    size_t count = CGImageSourceGetCount(source);
+    NSDictionary *global = CFBridgingRelease(CGImageSourceCopyProperties(source, NULL));
+    NSDictionary *first = CFBridgingRelease(CGImageSourceCopyPropertiesAtIndex(source, 0, NULL));
+    BOOL timing = NO, loop = NO;
+    NSArray *dictionaries = @[(NSString *)kCGImagePropertyPNGDictionary, (NSString *)kCGImagePropertyGIFDictionary,
+        (NSString *)kCGImagePropertyHEICSDictionary];
+    NSArray *delays = @[(NSString *)kCGImagePropertyAPNGDelayTime, (NSString *)kCGImagePropertyGIFDelayTime,
+        (NSString *)kCGImagePropertyHEICSDelayTime];
+    NSArray *unclamped = @[(NSString *)kCGImagePropertyAPNGUnclampedDelayTime, (NSString *)kCGImagePropertyGIFUnclampedDelayTime,
+        (NSString *)kCGImagePropertyHEICSUnclampedDelayTime];
+    NSArray *loops = @[(NSString *)kCGImagePropertyAPNGLoopCount, (NSString *)kCGImagePropertyGIFLoopCount,
+        (NSString *)kCGImagePropertyHEICSLoopCount];
+    for (NSUInteger kind = 0; kind < dictionaries.count; kind++) {
+        NSDictionary *container = global[dictionaries[kind]];
+        loop = loop || container[loops[kind]] != nil;
+        if (kind == 2) timing = timing || container[(NSString *)kCGImagePropertyHEICSFrameInfoArray] != nil;
+        for (size_t index = 0; index < count; index++) {
+            NSDictionary *frame = CFBridgingRelease(CGImageSourceCopyPropertiesAtIndex(source, index, NULL));
+            NSDictionary *properties = frame[dictionaries[kind]];
+            timing = timing || properties[delays[kind]] != nil || properties[unclamped[kind]] != nil;
+            loop = loop || properties[loops[kind]] != nil;
+        }
+    }
+    printf("source_format=%s\nframe_count=%zu\nwidth=%lu\nheight=%lu\ntiming_present=%s\nloop_present=%s\n",
+        format == NSNotFound ? "unsupported" : names[format], count,
+        (unsigned long)[first[(NSString *)kCGImagePropertyPixelWidth] unsignedIntegerValue],
+        (unsigned long)[first[(NSString *)kCGImagePropertyPixelHeight] unsignedIntegerValue],
+        timing ? "true" : "false", loop ? "true" : "false");
+    CFRelease(source); return YES;
+}
+
 static NSData *syntheticPNG(void) {
     CGColorSpaceRef space = CGColorSpaceCreateDeviceRGB();
     CGContextRef context = CGBitmapContextCreate(NULL, 32, 32, 8, 32 * 4, space,
@@ -65,6 +103,7 @@ int main(int argc, const char *argv[]) {
             BOOL decoded = data.length > 0 && data.length <= MaxBytes && decodable(data);
             printf("image_decoded=%s\n", decoded ? "true" : "false");
             if (!decoded) return 3;
+            if (!summary(data)) { puts("source_summary_created=false"); return 3; }
 #if __MAC_OS_X_VERSION_MAX_ALLOWED >= 150000
             if (@available(macOS 15.0, *)) {
                 // PNG deliberately tests unsupported input; this is not a converter.

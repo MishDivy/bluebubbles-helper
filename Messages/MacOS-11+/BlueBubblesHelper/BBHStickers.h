@@ -33,6 +33,8 @@ static inline BOOL BBHStickerMethod(Class cls, NSString *name, BOOL factory,
     return cls && BBHReactionClassMethodMatches(cls, NSSelectorFromString(name), factory, result, arguments);
 }
 
+#import "BBHStickerGlyphPreparation.h"
+
 static inline BOOL BBHStickerTransferABI(Class cls) {
     return (BBHStickerMethod(cls, @"setIsSticker:", NO, "v", @[@(@encode(bool))])
             || BBHStickerMethod(cls, @"setIsSticker:", NO, "v", @[@(@encode(char))]))
@@ -88,7 +90,9 @@ static inline NSDictionary *BBHHelperCapabilities(void) {
     NSMutableDictionary *capabilities = [BBHReactionCapabilities() mutableCopy];
     capabilities[@"stickerSending"] = @(BBHStickerSendingAvailable());
     capabilities[@"stickerPlacement"] = @NO;
-    capabilities[@"stickerRows"] = @(BBHStickerSendingAvailable());
+    BOOL inlineAvailable = BBHStickerSendingAvailable() && BBHStickerGlyphAvailable();
+    capabilities[@"stickerRows"] = @(inlineAvailable);
+    capabilities[@"stickerComposition"] = @(inlineAvailable);
     return capabilities;
 }
 
@@ -117,11 +121,26 @@ static inline BOOL BBHStickerRequestValid(id request) {
 
 static inline BOOL BBHStickerRowRequestValid(id request) {
     if (![request isKindOfClass:[NSDictionary class]]) return NO;
-    for (id key in request) if (![@[@"chatGuid", @"stickers"] containsObject:key]) return NO;
+    for (id key in request) if (![@[@"chatGuid", @"stickers", @"text"] containsObject:key]) return NO;
     if (!BBHStickerString(request[@"chatGuid"], 1024) || ![request[@"stickers"] isKindOfClass:NSArray.class]) return NO;
     NSArray *stickers = request[@"stickers"];
-    if (stickers.count < 2 || stickers.count > BBHStickerMaxRowItems) return NO;
+    if (stickers.count < (request[@"text"] ? 1UL : 2UL) || stickers.count > BBHStickerMaxRowItems) return NO;
     for (id sticker in stickers) if (!BBHStickerFieldsValid(sticker, NO)) return NO;
+    id text = request[@"text"];
+    if (text) {
+        if (![text isKindOfClass:NSString.class] || [text length] > 4096) return NO;
+        NSUInteger markers = 0;
+        for (NSUInteger index = 0; index < [text length]; index++) {
+            unichar unit = [text characterAtIndex:index];
+            if (unit == 0xfffc) markers++;
+            if (unit >= 0xd800 && unit <= 0xdbff) {
+                if (++index >= [text length]) return NO;
+                unichar low = [text characterAtIndex:index];
+                if (low < 0xdc00 || low > 0xdfff) return NO;
+            } else if (unit >= 0xdc00 && unit <= 0xdfff) return NO;
+        }
+        if (markers != stickers.count) return NO;
+    }
     return YES;
 }
 
@@ -374,7 +393,7 @@ static inline id BBHStickerConstructMessage(Class itemClass, Class messageClass,
 
 // Returns an exact constructed IMMessage GUID after one dispatch. Any error
 // after registration may have an unknown outcome and must never trigger retry.
-static inline NSString *BBHSendStickerSet(id chat, NSString *chatGUID, NSArray<NSDictionary *> *requests,
+static inline NSString *BBHSendStickerSet(id chat, NSString *chatGUID, NSArray<NSDictionary *> *requests, BOOL inlineRow, NSString *text,
                                         NSString *root, id center, Class transferClass, Class itemClass,
                                         Class messageClass, NSString **outGUID, NSArray<NSString *> **outAttachmentGUIDs) {
     if (outGUID) *outGUID = nil;
@@ -391,15 +410,42 @@ static inline NSString *BBHSendStickerSet(id chat, NSString *chatGUID, NSArray<N
         id service = BBHStickerObject(account, @"serviceName");
         if (![service isKindOfClass:NSString.class] || ![service isEqual:@"iMessage"])
             return @"Stickers require a native iMessage chat";
+        if (inlineRow && !BBHStickerGlyphAvailable()) return @"Native inline sticker preparation is unavailable";
         NSMutableArray<NSData *> *assets = [NSMutableArray new];
         NSMutableArray<NSDictionary *> *images = [NSMutableArray new];
-        NSUInteger totalBytes = 0;
+        NSUInteger totalBytes = 0, totalPixels = 0;
+        NSTimeInterval deadline = NSProcessInfo.processInfo.systemUptime + 5;
         for (NSDictionary *request in requests) {
+            if (inlineRow && NSProcessInfo.processInfo.systemUptime >= deadline) return @"Unable to prepare native inline sticker image";
             NSData *data = BBHStickerRead(request[@"filePath"], root);
+            if (inlineRow) {
+                if (!data) return @"Invalid or inaccessible sticker image";
+                CGImageSourceRef source = CGImageSourceCreateWithData((__bridge CFDataRef)data, NULL);
+                BOOL png = source && CGImageSourceGetType(source) && CFEqual(CGImageSourceGetType(source), CFSTR("public.png"));
+                NSUInteger frames = source ? CGImageSourceGetCount(source) : 0;
+                if (source) CFRelease(source);
+                if (!png) return @"Inline stickers require static PNG images";
+                if (frames != 1 || !BBHStickerGlyphStaticPNG(data)) return @"Animated stickers cannot be sent inline";
+                if (NSProcessInfo.processInfo.systemUptime >= deadline) return @"Unable to prepare native inline sticker image";
+            }
             NSDictionary *image = BBHStickerImage(data);
             if (!image || data.length > BBHStickerMaxRowBytes - totalBytes) return @"Invalid or inaccessible sticker image";
+            if (inlineRow) {
+                if (NSProcessInfo.processInfo.systemUptime >= deadline) return @"Unable to prepare native inline sticker image";
+                NSUInteger pixels = [image[@"width"] unsignedIntegerValue] * [image[@"height"] unsignedIntegerValue];
+                if (pixels > BBHStickerMaxPixels - totalPixels) return @"Inline sticker images exceed the decoded pixel limit";
+                totalPixels += pixels;
+            }
             totalBytes += data.length;
             [assets addObject:data]; [images addObject:image];
+        }
+        if (inlineRow) {
+            totalBytes = 0;
+            for (NSUInteger index = 0; index < assets.count; index++) {
+                NSData *prepared = BBHStickerGlyphPrepare(assets[index], NSClassFromString(@"NSAdaptiveImageGlyph"), deadline);
+                if (!prepared || prepared.length > BBHStickerMaxRowBytes - totalBytes) return @"Unable to prepare native inline sticker image";
+                totalBytes += prepared.length; assets[index] = prepared;
+            }
         }
         for (NSUInteger index = 0; index < requests.count; index++) {
             NSString *snapshot = BBHStickerSnapshot(assets[index], requests[index][@"filePath"], images[index][@"extension"], root);
@@ -407,7 +453,10 @@ static inline NSString *BBHSendStickerSet(id chat, NSString *chatGUID, NSArray<N
             if (!snapshot || ![BBHStickerRead(snapshot, root) isEqual:assets[index]]) return @"Unable to snapshot sticker image";
         }
         NSMutableArray<NSString *> *transferGUIDs = [NSMutableArray new];
-        NSMutableAttributedString *body = [[NSMutableAttributedString alloc] initWithString:@""];
+        NSString *bodyText = text ?: [@"" stringByPaddingToLength:requests.count withString:@"\ufffc" startingAtIndex:0];
+        NSMutableAttributedString *body = [[NSMutableAttributedString alloc] initWithString:bodyText attributes:@{
+            @"__kIMBaseWritingDirectionAttributeName": @(-1), @"__kIMMessagePartAttributeName": @0}];
+        NSUInteger marker = 0;
         for (NSUInteger index = 0; index < requests.count; index++) {
             NSString *snapshot = snapshots[index];
             id transfer = BBHStickerPrepareTransfer(center, transferClass, snapshot);
@@ -415,15 +464,17 @@ static inline NSString *BBHSendStickerSet(id chat, NSString *chatGUID, NSArray<N
             if (!transfer || [transferGUIDs containsObject:transferGUID]) return @"Unable to prepare native sticker transfer";
             NSDictionary *request = requests[index];
             NSString *filename = request[@"filename"] ?: [@"sticker." stringByAppendingString:images[index][@"extension"]];
-            if (requests.count > 1)
+            if (inlineRow)
                 BBHStickerRowStamp(transfer, assets[index], snapshot.lastPathComponent, request[@"stickerLabel"]);
             else BBHStickerStamp(transfer, assets[index], images[index], snapshot.lastPathComponent, request[@"stickerLabel"]);
             [transferGUIDs addObject:transferGUID];
             NSMutableDictionary *attributes = [@{
                 @"__kIMBaseWritingDirectionAttributeName": @(-1), @"__kIMFileTransferGUIDAttributeName": transferGUID,
                 @"__kIMMessagePartAttributeName": @0, @"__kIMEmojiImageAttributeName": @1} mutableCopy];
-            if (requests.count == 1) attributes[@"__kIMFilenameAttributeName"] = filename;
-            [body appendAttributedString:[[NSAttributedString alloc] initWithString:@"\ufffc" attributes:attributes]];
+            if (!inlineRow) attributes[@"__kIMFilenameAttributeName"] = filename;
+            NSRange range = [bodyText rangeOfString:@"\ufffc" options:0 range:NSMakeRange(marker, bodyText.length - marker)];
+            if (range.location == NSNotFound) return @"Invalid sticker body mapping";
+            [body addAttributes:attributes range:range]; marker = NSMaxRange(range);
         }
         NSString *expectedGUID = NSUUID.UUID.UUIDString;
         id message = BBHStickerConstructMessage(itemClass, messageClass, [body copy], [transferGUIDs copy], expectedGUID);
@@ -450,7 +501,7 @@ static inline NSString *BBHSendSticker(id chat, NSDictionary *request, NSString 
                                      NSString **outGUID) {
     if (outGUID) *outGUID = nil;
     if (!BBHStickerRequestValid(request)) return @"Invalid standalone sticker request";
-    return BBHSendStickerSet(chat, request[@"chatGuid"], @[request], root, center, transferClass, itemClass, messageClass, outGUID, NULL);
+    return BBHSendStickerSet(chat, request[@"chatGuid"], @[request], NO, nil, root, center, transferClass, itemClass, messageClass, outGUID, NULL);
 }
 
 static inline NSString *BBHSendStickerRow(id chat, NSDictionary *request, NSString *root,
@@ -459,5 +510,5 @@ static inline NSString *BBHSendStickerRow(id chat, NSDictionary *request, NSStri
     if (outGUID) *outGUID = nil;
     if (outAttachmentGUIDs) *outAttachmentGUIDs = nil;
     if (!BBHStickerRowRequestValid(request)) return @"Invalid sticker row request";
-    return BBHSendStickerSet(chat, request[@"chatGuid"], request[@"stickers"], root, center, transferClass, itemClass, messageClass, outGUID, outAttachmentGUIDs);
+    return BBHSendStickerSet(chat, request[@"chatGuid"], request[@"stickers"], YES, request[@"text"], root, center, transferClass, itemClass, messageClass, outGUID, outAttachmentGUIDs);
 }

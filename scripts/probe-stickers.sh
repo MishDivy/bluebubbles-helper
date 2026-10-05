@@ -15,7 +15,7 @@ case "${1:-macos}" in
             -isystem "$support/usr/include" -iframework "$support/System/Library/Frameworks"
             -L"$support/usr/lib" -F"$support/System/Library/Frameworks")
         ;;
-    *) echo 'Usage: bash scripts/probe-stickers.sh [macos|maccatalyst] [metadata|sizing|preview-scale|geometry|tapback|construction|row-lifecycle|glyph] [--synthetic]' >&2; exit 2 ;;
+    *) echo 'Usage: bash scripts/probe-stickers.sh [macos|maccatalyst] [metadata|sizing|preview-scale|geometry|tapback|construction|row-lifecycle|glyph|glyph-encoding] [--synthetic]' >&2; exit 2 ;;
 esac
 case "${2:-metadata}" in
     metadata) source_file="$root/tests/probe-stickers.m" ;;
@@ -29,6 +29,12 @@ case "${2:-metadata}" in
         [[ "${1:-macos}" == macos ]] || { echo 'Glyph data diagnostic requires the native macOS AppKit target.' >&2; exit 2; }
         [[ $# -le 3 && ( $# -lt 3 || "$3" == --synthetic ) ]] || { echo 'Glyph mode accepts only optional --synthetic.' >&2; exit 2; }
         source_file="$root/tests/probe-sticker-glyph.m"
+        flags+=(-framework AppKit)
+        ulimit -c 0
+        ;;
+    glyph-encoding)
+        [[ "${1:-macos}" == macos && $# -le 2 ]] || { echo 'Glyph encoding diagnostic requires macos and no extra arguments.' >&2; exit 2; }
+        source_file="$root/tests/probe-sticker-glyph-encoding.m"
         flags+=(-framework AppKit)
         ulimit -c 0
         ;;

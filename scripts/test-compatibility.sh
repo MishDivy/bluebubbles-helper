@@ -3,7 +3,7 @@ set -euo pipefail
 root=$(cd -- "$(dirname -- "$0")/.." && pwd -P)
 [[ $(uname -s) == Darwin ]] || { echo 'Requires macOS Command Line Tools.' >&2; exit 2; }
 test_dir=$(mktemp -d "${TMPDIR:-/tmp}/bbh-compat-test.XXXXXXXX")
-trap 'rm -f "$test_dir/compat-test" "$test_dir/reactions-test" "$test_dir/stickers-test" "$test_dir/sticker-tapbacks-test" "$test_dir/sticker-sandbox-test" "$test_dir/probe-build-check"; rmdir "$test_dir"' EXIT
+trap 'rm -f "$test_dir/compat-test" "$test_dir/reactions-test" "$test_dir/stickers-test" "$test_dir/sticker-tapbacks-test" "$test_dir/sticker-sandbox-test" "$test_dir/sticker-glyph-test" "$test_dir/probe-build-check"; rmdir "$test_dir"' EXIT
 xcrun clang -fobjc-arc -fblocks -Wall -Wextra -Werror -framework Foundation \
     -I"$root/Messages/MacOS-11+/BlueBubblesHelper" \
     "$root/tests/compatibility.m" -o "$test_dir/compat-test"
@@ -24,6 +24,11 @@ for experimental in 0 1; do
         "$root/tests/sticker-tapbacks.m" -o "$test_dir/sticker-tapbacks-test"
     "$test_dir/sticker-tapbacks-test"
 done
+xcrun clang -fobjc-arc -fblocks -Wall -Wextra -Werror -DBBH_EXPERIMENTAL_STICKERS=1 \
+    -framework AppKit -framework ImageIO -framework CoreGraphics \
+    -I"$root/Messages/MacOS-11+/BlueBubblesHelper" \
+    "$root/tests/sticker-glyph-preparation.m" -o "$test_dir/sticker-glyph-test"
+"$test_dir/sticker-glyph-test"
 xcrun clang -fobjc-arc -fblocks -Wall -Wextra -Werror \
     -framework Foundation -framework ImageIO -framework CoreGraphics -lsandbox \
     -I"$root/Messages/MacOS-11+/BlueBubblesHelper" \
@@ -39,6 +44,8 @@ xcrun clang -fobjc-arc -Wall -Wextra -Werror -framework Foundation \
     "$root/tests/probe-sticker-row-lifecycle.m" -o "$test_dir/probe-build-check"
 xcrun clang -fobjc-arc -Wall -Wextra -Werror -framework AppKit -framework CoreGraphics -framework ImageIO \
     "$root/tests/probe-sticker-glyph.m" -o "$test_dir/probe-build-check"
+xcrun clang -fobjc-arc -Wall -Wextra -Werror -framework AppKit -framework CoreGraphics -framework ImageIO \
+    "$root/tests/probe-sticker-glyph-encoding.m" -o "$test_dir/probe-build-check"
 xcrun clang -fobjc-arc -Wall -Wextra -Werror -framework Foundation \
     "$root/tests/probe-sticker-sizing.m" -o "$test_dir/probe-build-check"
 xcrun clang -fobjc-arc -Wall -Wextra -Werror -framework Foundation -framework CoreGraphics -framework ImageIO \

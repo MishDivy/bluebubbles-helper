@@ -2,6 +2,39 @@
 #include <assert.h>
 #include <stdio.h>
 
+static NSUInteger glyphCalls, glyphFailureAt, glyphMode;
+@interface StickerGlyph : NSObject
+@property NSString *contentIdentifier;
+@property NSData *imageContent;
+@end
+@implementation StickerGlyph
+- (instancetype)initWithImageContent:(NSData *)data {
+    glyphCalls++;
+    if (glyphCalls == glyphFailureAt || glyphMode == 1) return nil;
+    if (glyphMode == 2) return (id)[NSObject new];
+    if (glyphMode == 5) [NSException raise:@"Synthetic" format:@"private glyph details"];
+    self = [super init];
+    if (self) {
+        CGImageSourceRef source = CGImageSourceCreateWithData((__bridge CFDataRef)data, NULL);
+        CGImageMetadataRef metadata = source ? CGImageSourceCopyMetadataAtIndex(source, 0, NULL) : NULL;
+        self.contentIdentifier = glyphMode == 3 ? @"wrong-identifier" : metadata
+            ? CFBridgingRelease(CGImageMetadataCopyStringValueWithPath(metadata, NULL, CFSTR("tiff:DocumentName"))) : nil;
+        self.imageContent = glyphMode == 4 ? [NSData data] : [data copy];
+        if (metadata) CFRelease(metadata);
+        if (source) CFRelease(source);
+    }
+    return self;
+}
+@end
+
+@interface WrongStickerGlyph : StickerGlyph @end
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wmismatched-parameter-types"
+@implementation WrongStickerGlyph
+- (instancetype)initWithImageContent:(NSUInteger)data { (void)data; assert(0); return nil; }
+@end
+#pragma clang diagnostic pop
+
 @interface StickerAccount : NSObject
 @property NSString *serviceName;
 @end
@@ -291,7 +324,9 @@ static void AssertRowTransfer(StickerTransfer *transfer, NSData *data, NSString 
     NSString *bundle = @"com.apple.messages.MSMessageExtensionBalloonPlugin:0000000000:com.apple.Stickers.UserGenerated.MessagesExtension";
     assert([transfer.stickerUserInfo[@"pid"] isEqual:bundle]);
     assert([transfer.stickerUserInfo[@"sid"] isEqual:transfer.localURL.lastPathComponent]);
-    assert([transfer.stickerUserInfo[@"shash"] isEqual:BBHStickerDigest(data, YES)]);
+    NSData *prepared = [NSData dataWithContentsOfURL:transfer.localURL];
+    assert(prepared.length && ![prepared isEqual:data] && BBHStickerImage(prepared));
+    assert([transfer.stickerUserInfo[@"shash"] isEqual:BBHStickerDigest(prepared, YES)]);
     assert([transfer.attributionInfo[@"bundle-id"] isEqual:bundle]);
     assert([transfer.attributionInfo[@"name"] isEqual:@"Stickers"]);
     assert([transfer.attributionInfo[@"accessl"] isEqual:label]);
@@ -315,7 +350,8 @@ int main(void) {
         assert(!BBHStickerSendingAvailable());
         NSDictionary *nativeClasses = @{@"IMChat": StickerChat.class, @"IMAccount": StickerAccount.class,
             @"IMFileTransferCenter": StickerCenter.class, @"IMFileTransfer": StickerTransfer.class,
-            @"IMMessageItem": StickerItem.class, @"IMMessage": StickerMessage.class, @"IMChatRegistry": StickerRegistry.class};
+            @"IMMessageItem": StickerItem.class, @"IMMessage": StickerMessage.class, @"IMChatRegistry": StickerRegistry.class,
+            @"NSAdaptiveImageGlyph": StickerGlyph.class};
         for (NSString *name in nativeClasses) {
             Class cls = objc_allocateClassPair(nativeClasses[name], name.UTF8String, 0);
             assert(cls); objc_registerClassPair(cls);
@@ -324,12 +360,40 @@ int main(void) {
         NSDictionary *capabilities = BBHHelperCapabilities();
         assert([capabilities[@"stickerSending"] boolValue] == (BBH_EXPERIMENTAL_STICKERS == 1));
         assert([capabilities[@"stickerRows"] boolValue] == (BBH_EXPERIMENTAL_STICKERS == 1));
+        assert([capabilities[@"stickerComposition"] boolValue] == (BBH_EXPERIMENTAL_STICKERS == 1));
         for (NSString *key in @[@"stickerReactions", @"stickerPlacement"]) assert(![capabilities[key] boolValue]);
 
         char templatePath[] = "/private/tmp/bbh-sticker-fixture.XXXXXXXX";
         assert(mkdtemp(templatePath)); NSString *root = [NSString stringWithUTF8String:templatePath];
         NSMutableArray *files = [NSMutableArray new];
         NSData *png = Image(2, 3, 1, @"public.png");
+        assert(BBHStickerGlyphABI(StickerGlyph.class) && !BBHStickerGlyphABI(WrongStickerGlyph.class));
+        assert(!BBHStickerGlyphABI(NSObject.class) && !BBHStickerGlyphABI(Nil));
+        assert(BBHStickerGlyphStaticPNG(png));
+        assert(!BBHStickerGlyphStaticPNG(Image(2, 3, 2, @"public.png")));
+        NSTimeInterval deadline = NSProcessInfo.processInfo.systemUptime + 5;
+        assert(!BBHStickerGlyphPrepare(png, StickerGlyph.class, 0));
+        assert(!BBHStickerGlyphPrepare(png, WrongStickerGlyph.class, deadline));
+        assert(!BBHStickerGlyphPrepare(Image(2, 3, 2, @"public.png"), StickerGlyph.class, deadline));
+        assert(!BBHStickerGlyphPrepare(Image(2, 3, 1, @"public.jpeg"), StickerGlyph.class, deadline));
+        NSMutableData *boundedData = [NSMutableData new];
+        BBHStickerGlyphOutput bounded = {(__bridge void *)boundedData, 3, NO};
+        assert(BBHStickerGlyphWrite(&bounded, "abc", 3) == 3);
+        assert(!BBHStickerGlyphWrite(&bounded, "d", 1) && bounded.exceeded && boundedData.length == 3);
+        assert(!BBHStickerGlyphWrite(&bounded, "e", 1));
+        glyphCalls = 0;
+        NSData *prepared = BBHStickerGlyphPrepare(png, StickerGlyph.class, NSProcessInfo.processInfo.systemUptime + 5);
+        if (BBH_EXPERIMENTAL_STICKERS == 1) {
+            assert(prepared.length && ![prepared isEqual:png] && glyphCalls == 1);
+            CGImageSourceRef before = CGImageSourceCreateWithData((__bridge CFDataRef)png, NULL);
+            CGImageSourceRef after = CGImageSourceCreateWithData((__bridge CFDataRef)prepared, NULL);
+            CGImageRef original = CGImageSourceCreateImageAtIndex(before, 0, NULL), decoded = CGImageSourceCreateImageAtIndex(after, 0, NULL);
+            assert([BBHStickerGlyphPixels(original) isEqual:BBHStickerGlyphPixels(decoded)]);
+            CGImageRelease(original); CGImageRelease(decoded); CFRelease(before); CFRelease(after);
+            for (glyphMode = 1; glyphMode <= 5; glyphMode++)
+                assert(!BBHStickerGlyphPrepare(png, StickerGlyph.class, NSProcessInfo.processInfo.systemUptime + 5));
+            glyphMode = 0;
+        } else assert(!prepared && glyphCalls == 0);
         NSDictionary *metadata = BBHStickerImage(png);
         assert([metadata[@"width"] isEqual:@2] && [metadata[@"height"] isEqual:@3] && [metadata[@"frames"] isEqual:@1]);
         assert(BBHStickerImage(Image(2, 3, 1, @"public.jpeg")));
@@ -478,6 +542,55 @@ int main(void) {
             assert(!BBHStickerRowRequestValid(@{@"chatGuid": chat.guid, @"stickers": @[rowItems[0], badEntry]}));
         }
         assert(!BBHStickerRowRequestValid(@{@"chatGuid": chat.guid, @"stickers": @[@42, rowItems[0]]}));
+        NSString *mixedText = @" before \ufffc\nmid\U0001f642\ufffc after \ufffc ";
+        NSDictionary *mixed = @{@"chatGuid": chat.guid, @"stickers": rowItems, @"text": mixedText};
+        assert(BBHStickerRowRequestValid(mixed));
+        for (id invalidText in @[@"", @"plain", @"\ufffc", @"\ufffc\ufffc\ufffc\ufffc", @42, NSNull.null]) {
+            NSMutableDictionary *invalid = [mixed mutableCopy]; invalid[@"text"] = invalidText;
+            assert(!BBHStickerRowRequestValid(invalid));
+        }
+        for (NSUInteger count = 0; count <= 11; count++) {
+            NSMutableArray *items = [NSMutableArray new];
+            for (NSUInteger index = 0; index < count; index++) [items addObject:rowItems[0]];
+            NSString *text = [@"" stringByPaddingToLength:count withString:@"\ufffc" startingAtIndex:0];
+            assert(BBHStickerRowRequestValid(@{@"chatGuid": chat.guid, @"stickers": items, @"text": text}) == (count >= 1 && count <= 10));
+        }
+        for (NSNumber *unit in @[@0xd800, @0xdc00]) {
+            unichar characters[] = {0xfffc, unit.unsignedShortValue};
+            NSString *invalid = [NSString stringWithCharacters:characters length:2];
+            assert(!BBHStickerRowRequestValid(@{@"chatGuid": chat.guid, @"stickers": @[rowItems[0]], @"text": invalid}));
+        }
+        unichar nulCharacters[] = {0xfffc, 0};
+        assert(BBHStickerRowRequestValid(@{@"chatGuid": chat.guid, @"stickers": @[rowItems[0]],
+            @"text": [NSString stringWithCharacters:nulCharacters length:2]}));
+        NSString *longText = [@"\ufffc" stringByPaddingToLength:4096 withString:@"a" startingAtIndex:0];
+        assert(BBHStickerRowRequestValid(@{@"chatGuid": chat.guid, @"stickers": @[rowItems[0]], @"text": longText}));
+        assert(!BBHStickerRowRequestValid(@{@"chatGuid": chat.guid, @"stickers": @[rowItems[0]], @"text": [longText stringByAppendingString:@"a"]}));
+        if (BBH_EXPERIMENTAL_STICKERS == 1) {
+            chat.throwSend = NO; chat.changeGUID = NO; chat.sends = 0; center = [StickerCenter new];
+            assert(!SendRow(chat, mixed, root, center, StickerMessage.class, &guid));
+            assert(chat.sends == 1 && center.registrations == 3 && [chat.message.item.body.string isEqual:mixedText]);
+            NSUInteger transfer = 0;
+            for (NSUInteger index = 0; index < mixedText.length; index++) {
+                NSDictionary *attributes = [chat.message.item.body attributesAtIndex:index effectiveRange:NULL];
+                assert([attributes[@"__kIMMessagePartAttributeName"] isEqual:@0]);
+                assert([attributes[@"__kIMBaseWritingDirectionAttributeName"] isEqual:@(-1)]);
+                if ([mixedText characterAtIndex:index] == 0xfffc) {
+                    assert(attributes.count == 4 && [attributes[@"__kIMEmojiImageAttributeName"] isEqual:@1]);
+                    assert([attributes[@"__kIMFileTransferGUIDAttributeName"] isEqual:chat.message.item.transfers[transfer++]]);
+                } else assert(attributes.count == 2);
+            }
+            assert(transfer == 3);
+            for (NSString *snapshot in Snapshots(root)) BBHStickerRemoveSnapshot(snapshot, root);
+            for (NSString *text in @[@"\ufffc\ntext", @"\ufffctext", @"text\ufffc", @"\ufffc"]) {
+                center = [StickerCenter new]; chat.sends = 0;
+                assert(!SendRow(chat, @{@"chatGuid": chat.guid, @"stickers": @[rowItems[0]], @"text": text}, root, center, DirectStickerMessage.class, &guid));
+                assert(chat.sends == 1 && center.registrations == 1 && [chat.message.item.body.string isEqual:text]);
+                assert(![chat.message.item.body attribute:@"__kIMFilenameAttributeName" atIndex:0 effectiveRange:NULL]);
+                AssertRowTransfer(center.transfer, png, rowItems[0][@"stickerLabel"]);
+                for (NSString *snapshot in Snapshots(root)) BBHStickerRemoveSnapshot(snapshot, root);
+            }
+        }
         chat.throwSend = NO; chat.changeGUID = NO; chat.sends = 0;
         center = [StickerCenter new];
         error = SendRow(chat, row, root, center, StickerMessage.class, &guid);
@@ -495,11 +608,16 @@ int main(void) {
                 assert([[body attribute:@"__kIMMessagePartAttributeName" atIndex:index effectiveRange:NULL] isEqual:@0]);
                 assert([[body attribute:@"__kIMEmojiImageAttributeName" atIndex:index effectiveRange:NULL] isEqual:@1]);
                 assert([[body attribute:@"__kIMBaseWritingDirectionAttributeName" atIndex:index effectiveRange:NULL] isEqual:@(-1)]);
-                assert([BBHStickerRead(center.transfers[index].localURL.path, root) isEqual:png]);
+                assert(![BBHStickerRead(center.transfers[index].localURL.path, root) isEqual:png]);
                 AssertRowTransfer(center.transfers[index], png, rowItems[index][@"stickerLabel"]);
             }
             for (NSString *snapshot in Snapshots(root)) BBHStickerRemoveSnapshot(snapshot, root);
             for (NSUInteger index = 1; index <= 3; index++) {
+                glyphCalls = 0; glyphFailureAt = index;
+                center = [StickerCenter new]; chat.sends = 0;
+                assert(SendRow(chat, row, root, center, StickerMessage.class, &guid));
+                assert(!guid && glyphCalls == index && !center.allocations && !center.registrations && !chat.sends && !Snapshots(root).count);
+                glyphFailureAt = 0;
                 NSMutableArray *badItems = [rowItems mutableCopy];
                 badItems[index - 1] = @{@"filePath": oversized};
                 center = [StickerCenter new]; chat.sends = 0;
@@ -520,6 +638,17 @@ int main(void) {
                 assert(Snapshots(root).count == 3);
                 for (NSString *snapshot in Snapshots(root)) BBHStickerRemoveSnapshot(snapshot, root);
             }
+            NSString *animatedPath = [root stringByAppendingPathComponent:@"animated.png"];
+            NSData *animated = Image(2, 3, 2, @"public.png"); FixtureWrite(animated, animatedPath); [files addObject:animatedPath];
+            center = [StickerCenter new]; chat.sends = 0; glyphCalls = 0;
+            error = SendRow(chat, @{@"chatGuid": chat.guid, @"stickers": @[rowItems[0], @{@"filePath": animatedPath}]}, root, center, StickerMessage.class, &guid);
+            assert([error isEqual:@"Animated stickers cannot be sent inline"] && !guid && !glyphCalls && !center.allocations && !center.registrations && !chat.sends && !Snapshots(root).count);
+            assert([BBHStickerRead(animatedPath, root) isEqual:animated]);
+            center = [StickerCenter new];
+            assert(!Send(chat, @{@"chatGuid": chat.guid, @"filePath": animatedPath}, root, center, StickerMessage.class, &guid));
+            assert([BBHStickerRead(center.transfer.localURL.path, root) isEqual:animated]);
+            for (NSString *snapshot in Snapshots(root)) BBHStickerRemoveSnapshot(snapshot, root);
+            chat.sends = 0;
             center = [StickerCenter new]; center.duplicateGUIDAt = 2;
             assert(SendRow(chat, row, root, center, StickerMessage.class, &guid));
             assert(!guid && center.registrations == 0 && chat.sends == 0 && Snapshots(root).count == 0);

@@ -71,10 +71,14 @@ int main(void) {
         }
         const char *phase = "synthetic body";
         @try {
-            for (NSUInteger count = 1; count <= 2; count++) {
-                puts(count == 1 ? "Synthetic standalone:" : "Synthetic row:");
+            for (NSUInteger sample = 0; sample < 3; sample++) {
+                NSUInteger count = sample == 0 ? 1 : 2;
+                puts(sample == 0 ? "Synthetic standalone:" : sample == 1 ? "Synthetic row:" : "Synthetic composition:");
                 NSMutableArray *transfers = [NSMutableArray new];
-                NSMutableAttributedString *body = [[NSMutableAttributedString alloc] initWithString:@""];
+                NSString *text = sample == 2 ? @"prefix\ufffc\nsuffix\ufffc" : @"";
+                NSMutableAttributedString *body = [[NSMutableAttributedString alloc] initWithString:text attributes:@{
+                    @"__kIMMessagePartAttributeName": @0, @"__kIMBaseWritingDirectionAttributeName": @(-1)}];
+                NSUInteger marker = 0;
                 for (NSUInteger index = 0; index < count; index++) {
                     NSString *transfer = [NSString stringWithFormat:@"synthetic-nonexistent-transfer-%lu", (unsigned long)index];
                     [transfers addObject:transfer];
@@ -82,8 +86,11 @@ int main(void) {
                         @"__kIMFileTransferGUIDAttributeName": transfer,
                         @"__kIMMessagePartAttributeName": @0, @"__kIMEmojiImageAttributeName": @1,
                         @"__kIMBaseWritingDirectionAttributeName": @(-1)} mutableCopy];
-                    if (count == 1) attributes[@"__kIMFilenameAttributeName"] = @"synthetic.png";
-                    [body appendAttributedString:[[NSAttributedString alloc] initWithString:@"\ufffc" attributes:attributes]];
+                    if (sample == 0) attributes[@"__kIMFilenameAttributeName"] = @"synthetic.png";
+                    if (sample == 2) {
+                        NSRange range = [text rangeOfString:@"\ufffc" options:0 range:NSMakeRange(marker, text.length - marker)];
+                        [body addAttributes:attributes range:range]; marker = NSMaxRange(range);
+                    } else [body appendAttributedString:[[NSAttributedString alloc] initWithString:@"\ufffc" attributes:attributes]];
                 }
                 NSString *guid = NSUUID.UUID.UUIDString;
                 phase = "constructor invocation";
@@ -129,7 +136,7 @@ int main(void) {
         } @catch (NSException *exception) {
             (void)exception; return failed(phase);
         }
-        puts("Synthetic standalone and row construction passed. No chat, account, or transfer was queried or registered; no send occurred.");
+        puts("Synthetic standalone, row and composition construction passed. No chat, account, or transfer was queried or registered; no send occurred.");
         return 0;
     }
 }

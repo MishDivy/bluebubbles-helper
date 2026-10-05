@@ -328,6 +328,8 @@ NSMutableArray* vettedAliases;
         @try {
             if (row ? !BBHStickerRowRequestValid(data) : !BBHStickerRequestValid(data))
                 error = row ? @"Invalid sticker row request" : @"Invalid standalone sticker request";
+            else if (row && data[@"text"] && ![BBHHelperCapabilities()[@"stickerComposition"] boolValue])
+                error = @"Native sticker composition is unavailable";
             else if (!BBHStickerSendingAvailable()) error = @"Native sticker sending is unavailable";
             else {
                 // This branch avoids getChat's payload-bearing lookup errors.
