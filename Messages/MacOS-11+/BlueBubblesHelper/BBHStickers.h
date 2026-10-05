@@ -400,6 +400,7 @@ static inline NSString *BBHSendStickerSet(id chat, NSString *chatGUID, NSArray<N
     if (outAttachmentGUIDs) *outAttachmentGUIDs = nil;
     if (BBH_EXPERIMENTAL_STICKERS != 1) return @"Experimental sticker sending is disabled";
     NSMutableArray<NSString *> *snapshots = [NSMutableArray new]; BOOL registered = NO;
+    NSString *unknownError = @"Sticker dispatch outcome is unknown; do not retry";
     @try {
         if (!chat || !center || !BBHStickerMethod([chat class], @"account", NO, "@", @[]))
             return @"Native sticker sending is unavailable";
@@ -480,17 +481,27 @@ static inline NSString *BBHSendStickerSet(id chat, NSString *chatGUID, NSArray<N
         id message = BBHStickerConstructMessage(itemClass, messageClass, [body copy], [transferGUIDs copy], expectedGUID);
         if (!message) return @"Unable to construct native sticker message";
         registered = YES;
+        unknownError = @"Sticker registration outcome is unknown; do not retry";
         for (NSString *transferGUID in transferGUIDs)
             ((void (*)(id, SEL, id))objc_msgSend)(center, NSSelectorFromString(@"registerTransferWithDaemon:"), transferGUID);
+        unknownError = @"Sticker send outcome is unknown; do not retry";
         ((void (*)(id, SEL, id))objc_msgSend)(chat, NSSelectorFromString(@"sendMessage:"), message);
+        unknownError = @"Sticker message identifier lookup failed after dispatch; do not retry";
+        if (!BBHStickerMethod([message class], @"guid", NO, "@", @[]))
+            return @"Sticker message identifier is unavailable after dispatch; do not retry";
         id actualGUID = BBHStickerObject(message, @"guid");
-        if (![actualGUID isEqual:expectedGUID]) return @"Sticker dispatch outcome is unknown; do not retry";
+        if (![actualGUID isKindOfClass:NSString.class] || [actualGUID length] != 36
+            || ![[NSUUID alloc] initWithUUIDString:actualGUID])
+            return @"Sticker message identifier is unavailable after dispatch; do not retry";
+        // IMChat may assign a new GUID while sending this same message object.
         if (outGUID) *outGUID = [actualGUID copy];
         if (outAttachmentGUIDs) *outAttachmentGUIDs = [transferGUIDs copy];
         return nil;
     } @catch (NSException *exception) {
         (void)exception;
-        return registered ? @"Sticker dispatch outcome is unknown; do not retry" : @"Native sticker preparation failed";
+        if (outGUID) *outGUID = nil;
+        if (outAttachmentGUIDs) *outAttachmentGUIDs = nil;
+        return registered ? unknownError : @"Native sticker preparation failed";
     } @finally {
         if (!registered) for (NSString *snapshot in snapshots) BBHStickerRemoveSnapshot(snapshot, root);
     }

@@ -73,10 +73,16 @@ static NSUInteger glyphCalls, glyphFailureAt, glyphMode;
 @end
 
 @interface StickerMessage : NSObject
-@property NSString *guid;
+@property (nonatomic) NSString *guid;
 @property StickerItem *item;
+@property BOOL throwGUIDLookup;
 @end
 @implementation StickerMessage
+@synthesize guid = _guid;
+- (NSString *)guid {
+    if (self.throwGUIDLookup) [NSException raise:@"Synthetic" format:@"private identifier details"];
+    return _guid;
+}
 + (id)messageFromIMMessageItem:(StickerItem *)item sender:(id)sender subject:(id)subject {
     assert(!sender && !subject && item.bodyData.length);
     StickerMessage *message = [self new]; message.guid = item.guid; message.item = item; return message;
@@ -134,11 +140,20 @@ static NSUInteger glyphCalls, glyphFailureAt, glyphMode;
 @property NSUInteger sends;
 @property BOOL throwSend;
 @property BOOL changeGUID;
+@property NSUInteger invalidGUIDMode;
+@property BOOL throwGUIDLookup;
+@property NSString *constructedGUID;
 @end
 @implementation StickerChat
 - (void)sendMessage:(StickerMessage *)message {
     self.sends++; self.message = message;
-    if (self.changeGUID) message.guid = @"unexpected-guid";
+    self.constructedGUID = [message.guid copy];
+    if (self.changeGUID) message.guid = NSUUID.UUID.UUIDString;
+    if (self.invalidGUIDMode == 1) message.guid = @"GGGGGGGG-GGGG-GGGG-GGGG-GGGGGGGGGGGG";
+    if (self.invalidGUIDMode == 2) message.guid = nil;
+    if (self.invalidGUIDMode == 3) message.guid = (id)@42;
+    if (self.invalidGUIDMode == 4) message.guid = @"";
+    if (self.throwGUIDLookup) message.throwGUIDLookup = YES;
     if (self.throwSend) [NSException raise:@"Synthetic" format:@"private chat details"];
 }
 // A shared chat identifier must never supply the result of this operation.
@@ -471,17 +486,34 @@ int main(void) {
             assert(![[NSFileManager defaultManager] fileExistsAtPath:center.transfer.localURL.path]);
             chat.throwSend = YES;
             error = Send(chat, request, root, center, StickerMessage.class, &guid);
-            assert([error containsString:@"unknown"] && ![error containsString:@"private"] && !guid && chat.sends == 2);
+            assert([error isEqual:@"Sticker send outcome is unknown; do not retry"] && !guid && chat.sends == 2);
             assert([[NSFileManager defaultManager] fileExistsAtPath:center.transfer.localURL.path]);
             BBHStickerRemoveSnapshot(center.transfer.localURL.path, root);
             chat.throwSend = NO; center.throwRegistration = YES;
             error = Send(chat, request, root, center, StickerMessage.class, &guid);
-            assert([error containsString:@"unknown"] && chat.sends == 2 && !guid);
+            assert([error isEqual:@"Sticker registration outcome is unknown; do not retry"] && chat.sends == 2 && !guid);
             BBHStickerRemoveSnapshot(center.transfer.localURL.path, root);
             center.throwRegistration = NO; chat.changeGUID = YES;
             error = Send(chat, request, root, center, StickerMessage.class, &guid);
-            assert([error containsString:@"unknown"] && chat.sends == 3 && !guid);
+            assert(!error && [guid isEqual:chat.message.guid] && ![guid isEqual:chat.constructedGUID]
+                && [[NSUUID alloc] initWithUUIDString:guid] && chat.sends == 3);
             BBHStickerRemoveSnapshot(center.transfer.localURL.path, root);
+            chat.changeGUID = NO;
+            for (NSUInteger mode = 1; mode <= 4; mode++) {
+                chat.invalidGUIDMode = mode;
+                NSUInteger previousSends = chat.sends;
+                error = Send(chat, request, root, center, StickerMessage.class, &guid);
+                assert([error isEqual:@"Sticker message identifier is unavailable after dispatch; do not retry"]
+                    && !guid && chat.sends == previousSends + 1);
+                BBHStickerRemoveSnapshot(center.transfer.localURL.path, root);
+            }
+            chat.invalidGUIDMode = 0; chat.throwGUIDLookup = YES;
+            NSUInteger previousSends = chat.sends;
+            error = Send(chat, request, root, center, StickerMessage.class, &guid);
+            assert([error isEqual:@"Sticker message identifier lookup failed after dispatch; do not retry"]
+                && !guid && chat.sends == previousSends + 1);
+            BBHStickerRemoveSnapshot(center.transfer.localURL.path, root);
+            chat.throwGUIDLookup = NO;
         } else assert(error && !guid && center.allocations == 0 && chat.sends == 0);
         NSMutableArray *rowItems = [NSMutableArray new];
         for (NSUInteger index = 0; index < 3; index++) [rowItems addObject:@{@"filePath": path,
@@ -612,6 +644,26 @@ int main(void) {
                 AssertRowTransfer(center.transfers[index], png, rowItems[index][@"stickerLabel"]);
             }
             for (NSString *snapshot in Snapshots(root)) BBHStickerRemoveSnapshot(snapshot, root);
+            chat.changeGUID = YES; chat.sends = 0; center = [StickerCenter new];
+            assert(!SendRow(chat, row, root, center, StickerMessage.class, &guid));
+            assert([guid isEqual:chat.message.guid] && ![guid isEqual:chat.constructedGUID]
+                && chat.sends == 1 && center.registrations == 3
+                && [chat.message.item.transfers isEqual:center.registeredGUIDs]);
+            for (NSString *snapshot in Snapshots(root)) BBHStickerRemoveSnapshot(snapshot, root);
+            chat.changeGUID = NO;
+            for (NSUInteger mode = 1; mode <= 5; mode++) {
+                chat.invalidGUIDMode = mode <= 4 ? mode : 0;
+                chat.throwGUIDLookup = mode == 5;
+                chat.sends = 0; center = [StickerCenter new];
+                error = SendRow(chat, row, root, center, StickerMessage.class, &guid);
+                NSString *expectedError = mode == 5
+                    ? @"Sticker message identifier lookup failed after dispatch; do not retry"
+                    : @"Sticker message identifier is unavailable after dispatch; do not retry";
+                assert([error isEqual:expectedError] && !guid && chat.sends == 1 && center.registrations == 3
+                    && [chat.message.item.transfers isEqual:center.registeredGUIDs] && Snapshots(root).count == 3);
+                for (NSString *snapshot in Snapshots(root)) BBHStickerRemoveSnapshot(snapshot, root);
+            }
+            chat.invalidGUIDMode = 0; chat.throwGUIDLookup = NO;
             for (NSUInteger index = 1; index <= 3; index++) {
                 glyphCalls = 0; glyphFailureAt = index;
                 center = [StickerCenter new]; chat.sends = 0;
@@ -634,7 +686,8 @@ int main(void) {
                 assert(error && ![error containsString:@"private"] && !guid && center.registrations == 0 && chat.sends == 0 && Snapshots(root).count == 0);
                 center = [StickerCenter new]; center.failRegistrationAt = index;
                 error = SendRow(chat, row, root, center, StickerMessage.class, &guid);
-                assert([error containsString:@"unknown"] && !guid && center.allocations == 3 && center.registrations == index && chat.sends == 0);
+                assert([error isEqual:@"Sticker registration outcome is unknown; do not retry"]
+                    && !guid && center.allocations == 3 && center.registrations == index && chat.sends == 0);
                 assert(Snapshots(root).count == 3);
                 for (NSString *snapshot in Snapshots(root)) BBHStickerRemoveSnapshot(snapshot, root);
             }
@@ -673,7 +726,8 @@ int main(void) {
             for (NSString *snapshot in Snapshots(root)) BBHStickerRemoveSnapshot(snapshot, root);
             chat.throwSend = YES; chat.sends = 0; center = [StickerCenter new];
             error = SendRow(chat, row, root, center, StickerMessage.class, &guid);
-            assert([error containsString:@"unknown"] && !guid && chat.sends == 1 && center.registrations == 3 && Snapshots(root).count == 3);
+            assert([error isEqual:@"Sticker send outcome is unknown; do not retry"]
+                && !guid && chat.sends == 1 && center.registrations == 3 && Snapshots(root).count == 3);
             for (NSString *snapshot in Snapshots(root)) BBHStickerRemoveSnapshot(snapshot, root);
         } else assert(error && !guid && center.allocations == 0 && center.registrations == 0 && chat.sends == 0 && Snapshots(root).count == 0);
         assert([BBHStickerRead(path, root) isEqual:png]);
